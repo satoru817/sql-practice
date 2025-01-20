@@ -52,3 +52,67 @@ select
                 left join child_category_stats ccs on ccs.category_id = c.category_id
                 left join parent_category_stats pcs on pcs.category_id = c.category_id;
                             
+
+
+--AIによる改善案
+WITH stock_summary AS (
+    SELECT
+        SUM(p.stock_quantity * p.price) as total_stock_value
+    FROM products p
+),
+child_category_stats AS (
+    SELECT
+        c.category_id,
+        c.category_name,
+        SUM(p.stock_quantity) as total_stock,
+        SUM(p.stock_quantity * p.price) as total_stock_price,
+        CONCAT(
+            ROUND(
+                100.0 * SUM(p.stock_quantity * p.price) / 
+                FIRST_VALUE(SUM(p.stock_quantity * p.price)) OVER (ORDER BY NULL),
+                1
+            ),
+            '%'
+        ) as ratio
+    FROM
+        products p
+        INNER JOIN categories c ON c.category_id = p.category_id
+    GROUP BY 
+        c.category_id,
+        c.category_name
+),
+parent_category_stats AS (
+    SELECT
+        pc.category_id,
+        pc.category_name,
+        SUM(ccs.total_stock) as total_stock,
+        SUM(ccs.total_stock_price) as total_stock_price,
+        CONCAT(
+            ROUND(
+                100.0 * SUM(ccs.total_stock_price) / 
+                (SELECT total_stock_value FROM stock_summary),
+                1
+            ),
+            '%'
+        ) as ratio
+    FROM
+        child_category_stats ccs
+        INNER JOIN categories c ON c.category_id = ccs.category_id
+        INNER JOIN categories pc ON pc.category_id = c.parent_category_id
+    GROUP BY 
+        pc.category_id,
+        pc.category_name
+)
+SELECT
+    c.category_name,
+    COALESCE(pcs.total_stock, ccs.total_stock) as total_stock,
+    FORMAT(COALESCE(pcs.total_stock_price, ccs.total_stock_price), 0) as total_stock_price,
+    COALESCE(pcs.ratio, ccs.ratio) as ratio
+FROM
+    categories c
+    LEFT JOIN child_category_stats ccs ON ccs.category_id = c.category_id
+    LEFT JOIN parent_category_stats pcs ON pcs.category_id = c.category_id
+ORDER BY 
+    COALESCE(pcs.total_stock_price, ccs.total_stock_price) DESC;
+
+https://claude.ai/chat/023a59ae-ff97-42f3-a419-1479cec24738
