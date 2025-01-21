@@ -81,7 +81,7 @@ child_category_stats as (
                 categories c 
                     inner join books b on b.category_id = c.category_id
                     inner join order_items oi on oi.book_id = b.book_id
-                    inner join reviews rev on rev.book_id = b.book_id
+                    inner join reviews rev on rev.book_id = b.book_id--ここはleft join に変えるべき（AIの指摘)
             group by
                 c.category_id,
                 c.category_name,
@@ -104,6 +104,16 @@ parent_category_stats as(
                 pc.category_name
 )
 select
-    
+    c.category_name,
+    coalesce(ccs.total_sales,pcs.total_sales) as total_sales,
+    coalesce(ccs.avg_unit_price,pcs.avg_unit_price) as avg_unit_price,
+    coalesce(tip.top_3,tic.top_3) as top_3,
+    coalesce(ccs.avg_rating,pcs.avg_rating) as avg_rating
+        from
+            categories c 
+                left join child_category_stats ccs on ccs.category_id = c.category_id
+                left join parent_category_stats pcs on pcs.category_id = c.category_id    
+                left join top3_in_child tic on tic.category_id = c.category_id
+                left join top3_in_parent tip on tip.parent_category_id = c.category_id;
 
 
