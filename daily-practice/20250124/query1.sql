@@ -224,10 +224,90 @@ from
 
 
 
+--7. クロス集計による分析
+--   - 出版社×会員ランクごとの売上集計
+--   - 会員ランクごとの出版社別購入比率
+--   - 出版社ごとの会員ランク別売上構成比
+--*/
 
+--出版社ごとの会員ランク別売上構成比
 
+with pub_rank_stats as(
+    select
+        p.publisher_id,
+        p.publisher_name,
+        c.membership_rank,
+        sum(od.quantity*od.unit_price) as total_sales
+    from
+        publishers p
+        inner join books b
+            on b.publisher_id = p.publisher_id
+        inner join order_details od
+            on od.book_id = b.book_id
+        inner join orders o
+            on o.order_id = od.order_id
+        inner join customers c
+            on c.customer_id = o.customer_id
+    group by
+        p.publisher_name,
+        p.publisher_id,
+        c.membership_rank
+)
+select
+    publisher_name,
+    membership_rank,
+    concat(round(100.0*total_sales/sum(total_sales) over (partition by publisher_id),1),'%') as membership_ratio
+from
+    pub_rank_stats;
+    
+--出力結果
+--|publisher_name|membership_rank|membership_ratio|
+--|--------------|---------------|----------------|
+--|TechBooks Inc.|SILVER|14.9%|
+--|TechBooks Inc.|GOLD|85.1%|
+--|Literature Press|SILVER|61.2%|
+--|Literature Press|GOLD|38.8%|
+--|Science Publishing|BRONZE|73.2%|
+--|Science Publishing|GOLD|26.8%|
 
+--会員ランクごとの出版社別売上構成比
+with pub_rank_stats as(
+    select
+        p.publisher_id,
+        p.publisher_name,
+        c.membership_rank,
+        sum(od.quantity*od.unit_price) as total_sales
+    from
+        publishers p
+        inner join books b
+            on b.publisher_id = p.publisher_id
+        inner join order_details od
+            on od.book_id = b.book_id
+        inner join orders o
+            on o.order_id = od.order_id
+        inner join customers c
+            on c.customer_id = o.customer_id
+    group by
+        p.publisher_name,
+        p.publisher_id,
+        c.membership_rank
+)
+select
+    membership_rank,
+    publisher_name,
+    concat(round(100.0*total_sales/sum(total_sales) over (partition by membership_rank),1),'%') as publisher_ratio
+from
+    pub_rank_stats;
 
+--出力結果
+--|membership_rank|publisher_name|publisher_ratio|
+--|---------------|--------------|---------------|
+--|BRONZE|Science Publishing|100.0%|
+--|GOLD|TechBooks Inc.|71.2%|
+--|GOLD|Literature Press|20.2%|
+--|GOLD|Science Publishing|8.6%|
+--|SILVER|TechBooks Inc.|28.1%|
+--|SILVER|Literature Press|71.9%|
 
 
 
