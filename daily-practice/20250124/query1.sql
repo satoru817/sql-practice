@@ -116,20 +116,110 @@ from
     inner join cust_publisher_ranks cpr 
         on cpr.customer_id = css.customer_id and cpr.ranking = 1;
     
+--実行結果
+--"customer_name","cust_total_amount","cust_total_order_count","day_from_latest_purchase","avg_interval","most_frequent"
+--山田太郎,15800.00,3,349,4.0,TechBooks Inc.
+--鈴木花子,7000.00,2,348,7.0,Literature Press
+--田中一郎,3200.00,1,355,,Science Publishing
+--佐藤次郎,9900.00,2,350,2.0,TechBooks Inc.
+--高橋愛子,2800.00,1,352,,Science Publishing
+--渡辺健一,4400.00,1,351,,Literature Press
+--
+
+--6. 在庫分析
+--   - 書籍ごとの在庫金額（価格 × 在庫数）
+--   - 出版社ごとの総在庫金額
+--   - 売上対在庫比率の計算
+--   - 在庫金額が上位10%の書籍の抽出
 
 
+with book_stats as (
+    select
+        p.publisher_id,
+        p.publisher_name,
+        b.book_id,
+        b.title,
+        sum(b.stock_quantity*b.price) as total_stock_price
+    from
+        publishers p
+        inner join books b
+            on b.publisher_id = p.publisher_id
+    group by
+        p.publisher_id,
+        p.publisher_name,
+        b.book_id,
+        b.title
+)
+select
+    publisher_name,
+    sum(total_stock_price) over (partition by publisher_id) as publisher_total_stock_price,
+    title,
+    total_stock_price as book_total_stock_price
+from
+    book_stats;
+-- 実行結果
+--
+--|publisher_name|publisher_total_stock_price|title|book_total_stock_price|
+--|--------------|---------------------------|-----|----------------------|
+--|TechBooks Inc.|1305000.00|SQL基礎|280000.00|
+--|TechBooks Inc.|1305000.00|プログラミング入門|300000.00|
+--|TechBooks Inc.|1305000.00|データベース設計|245000.00|
+--|TechBooks Inc.|1305000.00|Webプログラミング|480000.00|
+--|Literature Press|803000.00|小説: 春の風|225000.00|
+--|Literature Press|803000.00|歴史物語|162000.00|
+--|Literature Press|803000.00|夏の詩集|240000.00|
+--|Literature Press|803000.00|古典文学選|176000.00|
+--|Science Publishing|536000.00|物理の謎|256000.00|
+--|Science Publishing|536000.00|化学実験の基礎|280000.00|
 
 
+--
+--クエリ2（要件3と4）
+--
+--売上対在庫比率と在庫金額上位10%の抽出を組み合わせて表示
+--出力イメージ:
+--
+--書籍名 | 在庫金額 | 直近1ヶ月売上額 | 売上対在庫比率 | 在庫金額順位（パーセンタイル）
+--データベース設計 | 245,000 | 35,000 | 14.3% | 上位10%
+--
 
-
-
-
-
-
-
-
-
-
+with book_stats as (
+    select
+        b.book_id,
+        b.title,
+        sum(oi.quantity*oi.unit_price) as total_sales,
+        b.price*b.stock_quantity as stock_price
+    from
+        books b
+        inner join order_details oi
+            on oi.book_id = b.book_id
+    group by
+        b.book_id,
+        b.title,
+        b.price,
+        b.stock_quantity
+)
+select
+    title,
+    stock_price,
+    total_sales,
+    concat(round(100.0*total_sales/stock_price,1),'%') as turnover_ratio,
+    concat('上位',round(100.0*(percent_rank() over (order by stock_price desc)),1),'%') as percentile_rank
+from
+    book_stats;
+--実行結果
+--|title|stock_price|total_sales|turnover_ratio|percentile_rank|
+--|-----|-----------|-----------|--------------|---------------|
+--|Webプログラミング|480000.00|6400.00|1.3%|上位0%|
+--|プログラミング入門|300000.00|2500.00|0.8%|上位11.1%|
+--|SQL基礎|280000.00|5600.00|2.0%|上位22.2%|
+--|化学実験の基礎|280000.00|5000.00|1.8%|上位22.2%|
+--|物理の謎|256000.00|3200.00|1.3%|上位44.4%|
+--|データベース設計|245000.00|7000.00|2.9%|上位55.6%|
+--|夏の詩集|240000.00|7200.00|3.0%|上位66.7%|
+--|小説: 春の風|225000.00|3000.00|1.3%|上位77.8%|
+--|古典文学選|176000.00|1200.00|0.7%|上位88.9%|
+--|歴史物語|162000.00|2000.00|1.2%|上位100%|
 
 
 
