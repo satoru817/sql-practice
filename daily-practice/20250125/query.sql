@@ -177,10 +177,54 @@ order by
 --- 売上の成長率（前週比）
 --製品ごとに新しい週順に表示してください。
 
+with prod_week_stats as (
+    select
+        p.product_id,
+        p.name,
+        date_sub(o.order_date,interval weekday(o.order_date) day) as week_start_date,
+        sum(oi.quantity*oi.unit_price) as week_total
+    from
+        products p 
+        inner join order_items oi on oi.product_id = p.product_id
+        inner join orders o on o.order_id = oi.order_id
+    group by
+        p.product_id,
+        p.name,
+        date_sub(o.order_date,interval weekday(o.order_date) day)--
+)
+select
+    pws.name,
+    pws.week_start_date,
+    pws.week_total,
+    pws.week_total - lag(pws.week_total,1) over (partition by pws.product_id order by pws.week_start_date asc) as week_change,
+    concat(round(100.0*(pws.week_total - lag(pws.week_total,1) over (partition by pws.product_id order by pws.week_start_date asc))/(lag(pws.week_total,1) over (partition by pws.product_id order by pws.week_start_date asc)),1),'%') as change_ratio
+from
+    prod_week_stats pws;
+
+--実行結果
+--|name|week_start_date|week_total|week_change|change_ratio|
+--|----|---------------|----------|-----------|------------|
+--|Laptop Pro|2024-01-01|1200.00|||
+--|Laptop Pro|2024-01-15|1200.00|0.00|0.0%|
+--|Wireless Mouse|2024-01-01|75.00|||
+--|Office Chair|2024-01-15|150.00|||
+--|Office Chair|2024-01-22|300.00|150.00|100.0%|
+--|Coffee Maker|2024-01-08|80.00|||
+--|Coffee Maker|2024-01-29|160.00|80.00|100.0%|
+--|Desk Lamp|2024-01-08|80.00|||
+--|Desk Lamp|2024-01-29|40.00|-40.00|-50.0%|
 
 
+なぜ WEEKDAY 関数と組み合わせる場合に DAY が必要なのか？
+以下のようなクエリを考えます：
 
 
+DATE_SUB(order_date, INTERVAL WEEKDAY(order_date) DAY)
+
+
+WEEKDAY(order_date): 日付が何曜日かを数値（0～6）で返します。たとえば、2025-01-25 は土曜日なので 5 を返します。
+INTERVAL ... DAY: WEEKDAY の結果が「日数」であるため、MySQLに「何日引くか」を正確に伝えるために DAY を付けています。
+もし DAY を省略すると、次のように MySQL は「この数値をどの単位で計算すればいいか」を判断できなくなり、エラーが発生します。
 
 
 
