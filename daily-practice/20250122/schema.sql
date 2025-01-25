@@ -44,3 +44,5 @@ CREATE TABLE order_items (
     FOREIGN KEY (order_id) REFERENCES orders(order_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
+
+https://claude.ai/chat/5a937ce9-f330-4649-a1e3-daf192c8ea76
