@@ -90,7 +90,38 @@ from
     
     
 
+2. 顧客セグメント分析
+   - 会員レベル（BRONZE/SILVER/GOLD/PLATINUM）ごとの：
+     - 総購入金額
+     - 平均購入金額
+     - 顧客数
+     - 1人あたりの注文回数
+   - レベルごとの売上構成比を算出
 
+with membership_stats as (
+    select
+        c.membership_level,
+        sum(o.total_amount) as total_amount,
+        sum(o.total_amount)/count(o.order_id) as avg_amount,
+        count(distinct c.customer_id) as customer_num,
+        count(o.order_id)/count(distinct c.customer_id) as avg_order_count
+    from
+        customers c
+        inner join orders o on o.customer_id = c.customer_id
+    where
+        o.status != 'CANCELLED'--ここの考慮が抜けていた。
+    group by
+        c.membership_level
+)
+select
+    membership_level,
+    round(total_amount,1) as total_amount,
+    round(avg_amount,1) as avg_amount,
+    customer_num,
+    round(avg_order_count,1)  as avg_order_count,
+    concat(round(100.0*total_amount/(sum(total_amount) over ()),1),'%') as ratio
+from
+    membership_stats;
 
 
 
