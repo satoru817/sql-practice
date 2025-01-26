@@ -123,7 +123,135 @@ select
 from
     membership_stats;
 
+3. 商品パフォーマンス分析
+   - 商品ごとの売上金額、販売数、粗利益を計算
+   - 商品別の評価平均とレビュー数
+   - 売上金額TOP10の商品リスト（カテゴリ名、評価平均を含む）
 
+--これは重要なミスのあるクエリ
+with prod_stats as (
+    select
+        p.product_id,
+        p.name,
+        sum(oi.quantity*oi.unit_price) as total_sales,
+        sum(oi.quantity) as total_quantity,
+        sum(oi.quantity*(oi.unit_price-p.cost)) as total_profit,
+        avg(r.rating) as avg_rating,
+        count(r.review_id) as review_count
+    from
+        products p
+        inner join order_items oi on oi.product_id = p.product_id
+        left join reviews r on r.product_id = p.product_id
+    group by 
+        p.product_id,
+        p.name,
+        p.price
+),
+prod_ranks as (
+    select
+        ps.*,
+        rank() over (order by ps.total_sales desc) as ranking
+    from
+        prod_stats ps
+)
+select
+    pr.ranking,
+    pr.name,
+    round(pr.total_sales,1) as total_sales,
+    pr.total_quantity,
+    round(pr.total_profit,1) as total_profit,
+    round(pr.avg_rating,1) as avg_rating,
+    pr.review_count
+from
+    prod_ranks pr
+where
+    pr.ranking <= 10
+order by
+    pr.ranking asc;
+
+
+ミスの詳細
+
+1. まず、結合の基本的な動作を見てみましょう：
+
+```sql
+-- 例として、あるproductに対して：
+-- order_items が 3行
+-- reviews が 2行 あるケース
+
+products
+product_id  name    price
+1          商品A    1000
+
+order_items
+product_id  quantity  unit_price
+1          2         1000        -- 注文1
+1          3         1000        -- 注文2
+1          1         1000        -- 注文3
+
+reviews
+product_id  rating  comment
+1          5       "良い"        -- レビュー1
+1          4       "まあまあ"    -- レビュー2
+```
+
+2. これらを単純に結合すると：
+```sql
+products × order_items × reviews の組み合わせになります。
+
+つまり：3(order_items) × 2(reviews) = 6行 のデータになります：
+
+product_id  name   quantity  rating
+1          商品A   2         5      -- 注文1×レビュー1
+1          商品A   2         4      -- 注文1×レビュー2
+1          商品A   3         5      -- 注文2×レビュー1
+1          商品A   3         4      -- 注文2×レビュー2
+1          商品A   1         5      -- 注文3×レビュー1
+1          商品A   1         4      -- 注文3×レビュー2
+```
+
+3. この状態で集計すると：
+```sql
+sum(quantity) -- > (2+2+3+3+1+1) = 12
+```
+実際の注文数量の合計は (2+3+1) = 6 なのに、レビューの数だけ重複してカウントされてしまいます。
+
+4. 正しい実装方法：
+```sql
+-- 方法1: 注文とレビューを別々に集計
+with order_summary as (
+    select 
+        product_id,
+        sum(quantity) as total_quantity,
+        sum(quantity * unit_price) as total_sales
+    from order_items
+    group by product_id
+),
+review_summary as (
+    select
+        product_id,
+        avg(rating) as avg_rating,
+        count(*) as review_count
+    from reviews
+    group by product_id
+)
+select
+    p.product_id,
+    p.name,
+    o.total_quantity,
+    o.total_sales,
+    r.avg_rating,
+    r.review_count
+from products p
+left join order_summary o on p.product_id = o.product_id
+left join review_summary r on p.product_id = r.product_id;
+```
+
+このように、多対多の関係がある場合は：
+1. 先に個別に集計を行う
+2. その後で結合する
+
+という順序で処理するのが安全です。元のクエリでは重複カウントの問題が発生していたことになります。
 
 
 
