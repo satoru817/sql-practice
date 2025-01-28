@@ -13,11 +13,6 @@ AIの出題
    - 最も人気のある商品カテゴリ
    - 初回購入から2回目の購入までの日数
 
-3. 時系列での売上トレンド
-   - 日次の売上推移
-   - 前日比の計算
-   - 7日間の移動平均
-   - カテゴリ別の売上構成比の推移
 
 クエリを書く際は以下の点に注意してください：
 - CTEを使用して複雑なクエリを整理する
@@ -47,7 +42,7 @@ AIの出題
 
 チャレンジしていただけますでしょうか？途中で質問があればお答えします。
 
-
+私の解答
 
 with prod_stats as (
     select
@@ -100,6 +95,7 @@ from
 
 この点について、どのように対応するのが良いとお考えでしょうか？
 
+改善した解答
 
 with prod_stats as (
     select
@@ -152,25 +148,213 @@ Electronics>Smartphones	Smartphone X	1600.0	2	400.0	25.0%	1	43.2%
 - 親カテゴリを持たない商品の分析
 - すべての商品を含めた売上構成比の把握
 
-問題2に進む前に、このクエリについて確認したい点や、さらに改善したい点はありますか？
 
 
 
 
+2. 顧客の購買パターン分析
+   - 顧客ランク別の平均購入額
+   - 顧客ごとの購入頻度
+   - 最も人気のある商品カテゴリ
+   - 初回購入から2回目の購入までの日数
+
+はい、問題2の「顧客の購買パターン分析」の要件を明確にします。
+
+期待する出力として、以下の4つの観点での分析が必要です：
+
+1. 顧客ランク別の平均購入額
+- 顧客ランク（BRONZE, SILVER, GOLD, PLATINUM）ごとに集計
+- 出力カラム：
+  * 顧客ランク
+  * そのランクの顧客数
+  * 1注文あたりの平均購入額
+  * そのランクの総注文数
+
+2. 顧客ごとの購入頻度
+- 各顧客の購入パターンを分析
+- 出力カラム：
+  * 顧客ID
+  * 顧客名
+  * 顧客ランク
+  * 総注文回数
+  * 総購入金額
+  * 平均購入金額（1回あたり）
+
+3. 最も人気のある商品カテゴリ
+- 顧客ランクごとの好みのカテゴリを分析
+- 出力カラム：
+  * 顧客ランク
+  * カテゴリパス（親カテゴリ > 子カテゴリ）
+  * 購入金額
+  * そのランク内での構成比率（％）
+
+4. 初回購入から2回目の購入までの日数
+- 複数回購入した顧客のみを対象
+- 出力カラム：
+  * 顧客ID
+  * 顧客名
+  * 初回購入日
+  * 2回目の購入日
+  * 経過日数
+
+各分析は別々のクエリとして作成してください。どの分析から始めてみますか？
+
+
+1. 顧客ランク別の平均購入額
+- 顧客ランク（BRONZE, SILVER, GOLD, PLATINUM）ごとに集計
+- 出力カラム：
+  * 顧客ランク
+  * そのランクの顧客数
+  * 1注文あたりの平均購入額
+  * そのランクの総注文数
+
+select
+    c.`rank` as `rank`,
+    count(distinct c.customer_id) as customer_num,
+    coalesce(round(sum(o.total_amount)/sum(o.order_id),1),0) as  avg_purchase,
+    count(o.order_id) as total_order
+from
+    customers c
+    inner join orders o on o.customer_id = c.customer_id
+group by
+    c.`rank`;
+
+
+2. 顧客ごとの購入頻度
+- 各顧客の購入パターンを分析
+- 出力カラム：
+  * 顧客ID
+  * 顧客名
+  * 顧客ランク
+  * 総注文回数
+  * 総購入金額
+  * 平均購入金額（1回あたり）
 
 
 
+select
+    c.customer_id,
+    c.customer_name,
+    c.`rank`,
+    count(o.order_id) as total_order,
+    sum(o.total_amount) as total_purchase,
+    round(coalesce(sum(o.total_amount)/count(o.order_id),0),1) as avg_order_amount
+from
+    customers c
+    inner join orders o on o.customer_id = c.customer_id
+group by
+    c.customer_id,
+    c.customer_name,
+    c.`rank`
+order by
+    sum(o.total_amount) desc;
+
+実行結果
+customer_id|customer_name|rank    |total_order|total_purchase|avg_order_amount|
+-----------+-------------+--------+-----------+--------------+----------------+
+          1|John Smith   |GOLD    |          2|       1449.97|           725.0|
+          2|Jane Doe     |SILVER  |          1|       1299.99|          1300.0|
+          3|Bob Wilson   |PLATINUM|          1|        869.97|           870.0|
+          4|Alice Brown  |BRONZE  |          1|         69.98|            70.0|
 
 
+3. 最も人気のある商品カテゴリ
+- 顧客ランクごとの好みのカテゴリを分析
+- 出力カラム：
+  * 顧客ランク
+  * カテゴリパス（親カテゴリ > 子カテゴリ）
+  * 購入金額
+  * そのランク内での構成比率（％）
+
+with category_rank_stats as (
+    select
+        cust.`rank`,
+        coalesce(pc.category_name,'親カテゴリー無し') as parent_category,
+        c.category_name as child_category,
+        sum(oi.quantity*oi.unit_price) as total_purchase
+    from
+        customers cust
+        inner join orders o on o.customer_id = cust.customer_id
+        inner join order_items oi on oi.order_id = o.order_id
+        inner join products p on p.product_id = oi.product_id
+        inner join categories c on c.category_id = p.category_id
+        left join categories pc on pc.category_id = c.parent_category_id
+    group by
+        cust.`rank`,
+        pc.category_name,
+        c.category_name
+)
+select
+    `rank`,
+    concat(parent_category,'>',child_category) as category_path,
+    coalesce(round(total_purchase,1),0) as total_purchase,
+    concat(coalesce(round(total_purchase*100.0/sum(total_purchase) over (partition by `rank`),1),0),'%') as ratio_in_rank
+from
+    category_rank_stats
+order by
+    `rank`,
+    total_purchase desc;
 
 
+実行結果    
+|rank|category_path|total_purchase|ratio_in_rank|
+|----|-------------|--------------|-------------|
+|BRONZE|Books>Non-Fiction|50.0|55.6%|
+|BRONZE|Books>Fiction|40.0|44.4%|
+|GOLD|Electronics>Smartphones|800.0|55.6%|
+|GOLD|親カテゴリー無し>Electronics|600.0|41.7%|
+|GOLD|Books>Fiction|40.0|2.8%|
+|PLATINUM|Electronics>Smartphones|800.0|92.0%|
+|PLATINUM|Books>Non-Fiction|50.0|5.7%|
+|PLATINUM|Books>Fiction|20.0|2.3%|
+|SILVER|Electronics>Laptops|1300.0|100.0%|
 
 
+4. 初回購入から2回目の購入までの日数
+- 複数回購入した顧客のみを対象
+- 出力カラム：
+  * 顧客ID
+  * 顧客名
+  * 初回購入日
+  * 2回目の購入日
+  * 経過日数
 
 
-
-
-
+with ranked_cte as (
+    select
+        c.customer_id,
+        c.customer_name,
+        o.order_date,
+        row_number() over (partition by c.customer_id order by o.order_date asc) as ranking
+    from
+        customers c
+        inner join orders o on o.customer_id = c.customer_id
+),
+first_orders as (
+    select
+        rc.*
+    from
+        ranked_cte rc
+    where
+        rc.ranking = 1
+),
+second_orders as (
+    select
+        rc.customer_id,
+        rc.order_date
+    from
+        ranked_cte rc
+    where
+        rc.ranking = 2
+)
+select
+    fo.*,
+    so.order_date as second_order,
+    timestampdiff(day,fo.order_date,so.order_date) as time_lapse
+from
+    first_orders fo
+    inner join second_orders so on fo.customer_id = so.customer_id;
+    
 
 
 
