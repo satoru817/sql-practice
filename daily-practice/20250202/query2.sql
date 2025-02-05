@@ -446,7 +446,7 @@ json_cte as(
         group by
             pr.profit_rank,
             pr.parent_category         
-    ) as stats_of_profit_rank_and_parent_category
+    ) as stats_of_profit_rank_and_parent_category --これ注意（table名のaliasが必要)
     group by
         profit_rank    
 )
@@ -670,7 +670,7 @@ order by
 |Mid Profit |6            |1,368.89   |533.89      |39.00%       |12            |"{\"Books\": 1, \"Clothing\": 4, \"Electronics\": 1}"|
 |Low Profit |3            |189.94     |94.94       |49.98%       |6             |"{\"Books\": 3}"                                     |
 
-
+--結果
 AIのと私のとで結果は変わらない。
 
 
