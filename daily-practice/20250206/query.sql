@@ -47,6 +47,7 @@
 
 では、この要件でクエリを作成していただけますでしょうか？
 
+--私の解答
 
 with prod_parent_stats as (
     select
@@ -78,7 +79,7 @@ from
 group by
     parent_category;
 
-
+--出力結果
 |parent_category|number_of_products|total_sales|avg_unit_price|
 |---------------|------------------|-----------|--------------|
 |本・コミック         |7                 |22,000     |1,000         |
@@ -87,6 +88,112 @@ group by
 
 
 
+--問題2
+
+
+
+with prod_parent_stats as (
+    select
+        pr.product_id,
+        pr.name,
+        coalesce(pc.name,'親カテゴリー無し') as parent_category,
+        sum(oi.quantity*oi.unit_price) as total_sales,
+        sum(oi.quantity) as total_quantity
+    from
+        products pr
+        left join categories c on c.category_id = pr.category_id
+        left join categories pc on pc.category_id = c.parent_category_id
+        left join order_items oi on oi.product_id = pr.product_id
+        left join orders o 
+            on o.order_id = oi.order_id
+            and year(o.order_date) = 2024
+            and quarter(o.order_date) = 4
+            and o.status != 'cancelled'
+    group by
+        pr.product_id,
+        pr.name,
+        coalesce(pc.name,'親カテゴリー無し')
+),
+prod_parent_ranks as (
+    select
+        *,
+        rank() over (partition by parent_category order by total_sales desc) as in_category_rank
+    from
+        prod_parent_stats
+)
+select
+    parent_category,
+    name as product_name,
+    total_sales,
+    total_quantity,
+    in_category_rank
+from
+    prod_parent_ranks
+where
+    in_category_rank <= 3;
+
+--実行結果
+|parent_category|product_name|total_sales|total_quantity|in_category_rank|
+|---------------|------------|-----------|--------------|----------------|
+|ファッション         |Tシャツ M      |10,000     |5             |1               |
+|ファッション         |スカート M      |8,000      |2             |2               |
+|ファッション         |Tシャツ L      |           |              |3               |
+|ファッション         |スカート L      |           |              |3               |
+|家電             |コーヒーメーカー    |16,000     |2             |1               |
+|家電             |電子ケトル       |8,500      |2             |2               |
+|家電             |キーボード       |6,000      |1             |3               |
+|本・コミック         |小説 A        |7,500      |5             |1               |
+|本・コミック         |ビジネス本 A     |7,500      |3             |1               |
+|本・コミック         |コミック A      |7,000      |14            |3               |
+
+
+
+--AIの採点
+## 採点結果: 95/100点
+
+### 優れている点 👍
+1. データ構造の理解と適切な実装
+   - CTEを使用した段階的な処理
+   - LEFT JOINによる欠損データの適切な処理
+   - Window関数の効果的な活用
+
+2. 堅牢性の高いコード
+   - COALESCEによるNULL処理
+   - NULLIFによるゼロ除算防止
+   - 条件の適切な配置（注文のフィルタリング）
+
+3. 要件の充足
+   - 親カテゴリー単位での集計
+   - TOP3の抽出
+   - 売上0の商品も含めた表示
+
+### 改善の余地がある点 📝
+1. 金額のフォーマット
+```sql
+round(total_sales, 2) as total_sales
+```
+
+2. 日付条件の書き方
+```sql
+-- 現在の実装
+year(o.order_date) = 2024 and quarter(o.order_date) = 4
+
+-- より効率的な実装
+o.order_date between '2024-10-01' and '2024-12-31'　
+```
+
+### 総評
+実務レベルの非常に良質なクエリが実装できています。特にNULLの処理や結合の使い方が適切で、メンテナンス性も高いコードになっています。微細な最適化の余地はありますが、基本的な実装は完璧です。
+
+
+
+--考察
+
+year(o.order_date)=2024 and quarter(o.order_date)=4を
+o.order_date between '2024-10-01' and '2024-12-31'
+と書いたほうが効率が善いということを知らなかった。今後はbetween句を利用するようにしたい。
+
+AIに褒められているが、claude.aiだけでなくほかのaiにも採点させたほうがいいのか？
 
 
 
