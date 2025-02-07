@@ -1,7 +1,7 @@
 以下のようなECサイトのデータ分析の問題を出させていただきます：
 
 ## テーブル構造
-```sql
+
 CREATE TABLE products (
     product_id INT PRIMARY KEY,
     name VARCHAR(100),
@@ -32,7 +32,7 @@ CREATE TABLE order_items (
     unit_price DECIMAL(10,2),
     PRIMARY KEY (order_id, product_id)
 );
-```
+
 
 ## 問題
 2024年第4四半期（10-12月）の売上データについて、以下の分析を行うクエリを作成してください：
