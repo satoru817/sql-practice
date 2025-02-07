@@ -57,7 +57,7 @@ group by
 これは上手くいった。
 
 
-
+--子カテゴリについてのみ
 
 with category_spec_stats as (
     select
@@ -127,15 +127,79 @@ group by
     c.category_id,
     c.name,
     crs.avg_rating;
+--実行結果
 
 
 
+"name","total_sales","total_profit","popular_specs","avg_rating","delivery_method_distribution"
+文学・小説,1540.00,770.00,"{""pages"": 120, ""format"": ""hardcover"", ""weight"": 250, ""language"": ""JP""}",5.0000,"{""コンビニ受取"": 1}"
+ビジネス書,24640.00,12320.00,"{""pages"": 320, ""format"": ""paperback"", ""weight"": 400, ""language"": ""JP""},{""pages"": 280, ""format"": ""paperback"", ""weight"": 350, ""language"": ""JP""},{""pages"": 280, ""format"": ""paperback"", ""weight"": 350, ""language"": ""JP""},{""pages"": 280, ""format"": ""paperback"", ""weight"": 350, ""language"": ""JP""},{""pages"": 280, ""format"": ""paperback"", ""weight"": 350, ""language"": ""JP""},{""pages"": 320, ""format"": ""paperback"", ""weight"": 400, ""language"": ""JP""},{""pages"": 320, ""format"": ""paperback"", ""weight"": 400, ""language"": ""JP""},{""pages"": 320, ""format"": ""paperback"", ""weight"": 400, ""language"": ""JP""}",4.0000,"{""宅配便"": 1, ""コンビニ受取"": 1}"
+スマートフォン,1764000.00,529200.00,"{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""white"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""blue"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""512GB""},{""color"": ""blue"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""512GB""},{""color"": ""blue"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""512GB""},{""color"": ""blue"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""512GB""},{""color"": ""blue"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""512GB""},{""color"": ""black"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""black"", ""screen"": ""6.1inch"", ""weight"": 174, ""storage"": ""256GB""},{""color"": ""black"", ""screen"": ""6.1inch"", ""weight"": 174,",4.6000,"{""宅配便"": 2, ""店舗受取"": 1}"
+タブレット,315200.00,91760.00,"{""color"": ""space-gray"", ""screen"": ""11inch"", ""weight"": 471, ""storage"": ""256GB""},{""color"": ""silver"", ""screen"": ""11inch"", ""weight"": 471, ""storage"": ""512GB""},{""color"": ""silver"", ""screen"": ""11inch"", ""weight"": 471, ""storage"": ""512GB""},{""color"": ""space-gray"", ""screen"": ""11inch"", ""weight"": 471, ""storage"": ""256GB""}",4.0000,"{""宅配便"": 2}"
+マンガ,968.00,484.00,"{""pages"": 192, ""format"": ""paperback"", ""weight"": 180, ""language"": ""JP""},{""pages"": 192, ""format"": ""paperback"", ""weight"": 180, ""language"": ""JP""}",5.0000,"{""コンビニ受取"": 1}"
+オーディオ機器,59600.00,29800.00,"{""color"": ""black"", ""weight"": 67, ""battery"": ""30h"", ""water_resistant"": true},{""color"": ""black"", ""weight"": 67, ""battery"": ""30h"", ""water_resistant"": true}",5.0000,"{""宅配便"": 2}"
+調理家電,32800.00,16400.00,"{""color"": ""black"", ""timer"": true, ""weight"": 4200, ""capacity"": ""1L""}",5.0000,"{""宅配便"": 1}"
 
+--親カテゴリは無視したクエリのAI採点
 
+このクエリを分析させていただきます。
 
+優れている点：
 
+1. CTEを効果的に使用して複雑なクエリを論理的なステップに分割しています。これにより、コードの可読性と保守性が高まっています。
 
+2. JSON操作の適切な実装：
+```sql
+o.delivery_info->>'$.method' as delivery_method
+```
+このように、JSON型のデータから必要な情報を抽出する構文を正しく使用しています。
 
+3. Window関数の効果的な活用：
+```sql
+rank() over (partition by category_id order by total_quantity) as rank_in_category
+```
+カテゴリごとの人気スペックをランク付けする実装が適切です。
+
+4. 集計関数の組み合わせ：
+```sql
+json_objectagg(cds.delivery_method,cds.delivery_count) as delivery_method_distribution
+```
+配送方法の分布をJSON形式で集約する工夫が見られます。
+
+改善できる点：
+
+1. 利益率の計算：
+現在は総利益のみを計算していますが、利益率（総利益÷売上）も有用な指標となります。以下のように修正できます：
+```sql
+sum(oi.quantity*(oi.unit_price-p.cost))/sum(oi.quantity*oi.unit_price)*100 as profit_margin
+```
+
+2. レビュー詳細の分析：
+現在は平均評価のみを使用していますが、review_detailsのJSONデータから詳細な評価項目ごとの平均も取得できます。
+
+3. 注文のステータスチェック：
+cancelled以外を除外していますが、completedのみに絞るなど、より明確な条件設定が考えられます。
+
+4. group_concatの制限：
+popular_specsでgroup_concatを使用していますが、JSONデータそのものを連結すると読みづらくなる可能性があります。主要な仕様のみを抽出することを検討してください。
+
+発展的な提案：
+
+1. 時系列での傾向分析の追加：
+```sql
+date_format(o.order_date, '%Y-%m') as order_month
+```
+を追加することで、月次での推移を確認できます。
+
+2. カテゴリごとの特徴的な評価項目の抽出：
+```sql
+json_keys(rev.review_details) as review_categories
+```
+を使用して、カテゴリ固有の評価項目を分析できます。
+
+このクエリは全体的によく構築されていますが、これらの改善を加えることで、より充実した分析が可能になります。
+
+--
 
 
 
