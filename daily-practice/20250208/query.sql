@@ -445,15 +445,26 @@ with cust_product_history as (
         inner join order_items oi on oi.order_id = o.order_id
 ),
 customized_order_items as (
-    
-)
+    select
+        distinct
+            oi.product_id
+    from
+        order_items oi
+    where
+        oi.customization IS NOT NULL
+),
 cust_potentials as (
     select
         cust.customer_id,
         cust.name,
         p.product_id,
         p.name as product_name,
-        p.attributes->>'$.sizes_available' as size_available
+        case 
+            when p.attributes->>'$.sizes_available' IS NULL THEN 1 ELSE 0 END
+        as size_changeable,
+        case
+            when coi.product_id IS NULL THEN 1 else 0 end 
+        as customizationable
     from
         customers cust
         inner join products p
@@ -467,15 +478,77 @@ cust_potentials as (
         left join cust_product_history cph
             on cph.customer_id = cust.customer_id
             and cph.product_id = p.product_id
+        left join customized_order_items coi on coi.product_id = p.product_id
     where
         cph.product_id IS NULL
 )
+select
+    name as customer_name,
+    product_name
+from
+    cust_potentials
+order by
+	name asc,
+    size_changeable asc,
+    customizationable asc;
+
+--実行結果
+
+|customer_name|product_name   |
+|-------------|---------------|
+|佐藤美咲         |プラチナダイヤリング     |
+|山田花子         |パールネックレス       |
+|山田花子         |ダイヤモンドテニスブレスレット|
+|鈴木一郎         |スタッドピアス        |
+|高橋恵子         |クラシックダイヤモンドリング |
+|高橋恵子         |プラチナダイヤリング     |
+|高橋恵子         |華やかゴールドピアス     |
 
 
+--AIの採点
+とても良い実装ですね！以下の点が特に優れています：
 
+1. クエリの構造化
+   - 購入履歴の抽出（cust_product_history）
+   - カスタマイズ可能商品の抽出（customized_order_items）
+   - レコメンデーション候補の抽出（cust_potentials）
+   という論理的な流れでCTEを使用しています。
 
+2. 条件の実装
+   ```sql
+   JSON_CONTAINS(cust.preferences->'$.preferred_materials',p.attributes->'$.material')
+   ```
+   - JSON操作を適切に実装
+   - 会員ランクによる価格制限のケース分け
+   - 未購入商品のフィルタリング
 
+3. エラー防止の工夫
+   - distinctによる重複排除
+   - left joinでの適切なデータ結合
 
+改善案として検討できる点：
+
+1. ソート順の優先度
+```sql
+order by
+    name asc,
+    size_changeable desc,  -- 変更可能を優先
+    customizationable desc -- カスタマイズ可能を優先
+```
+
+2. 価格帯の条件分岐
+```sql
+CASE cust.membership_level 
+    WHEN 'PLATINUM' THEN true
+    WHEN 'GOLD' THEN p.base_price <= 200000
+    WHEN 'SILVER' THEN p.base_price <= 100000
+    ELSE p.base_price <= 50000
+END
+```
+
+ただし、これらは好みの問題で、現状の実装でも十分実用的です。実務で必要な考慮事項（JSONデータの扱い、会員ランクによる制御、購入履歴の確認）を適切に実装できています。素晴らしい解答だと思います。
+
+--うん、ありがとう。
 
 
 
