@@ -72,3 +72,39 @@ INSERT INTO order_items (order_id, product_id, quantity, unit_price, customizati
 (2, 3, 1, 45000, '{"gift_wrap": true}'),
 (3, 1, 1, 150000, '{"size": 9, "engraving": "Together"}'),
 (3, 2, 1, 80000, '{"length_adjustment": -2}');
+
+
+-- カテゴリーのデータ追加
+INSERT INTO categories (category_id, name, parent_id) VALUES
+(7, 'ブレスレット', NULL),
+(8, 'シルバーリング', 1);
+
+-- 商品の追加
+INSERT INTO products (product_id, name, category_id, base_price, attributes) VALUES
+(4, 'シンプルシルバーリング', 8, 25000, '{"material": "silver", "sizes_available": [7,8,9,10,11], "style": "simple"}'),
+(5, 'ダイヤモンドテニスブレスレット', 7, 200000, '{"material": "white_gold", "carat_total": 1.5, "length": 18}'),
+(6, 'クラシックパールネックレス', 5, 65000, '{"material": "silver", "pearl_type": "freshwater", "pearl_size": 6.5, "length": 42}'),
+(7, 'プラチナダイヤリング', 4, 180000, '{"material": "platinum", "carat": 0.7, "clarity": "VVS1", "sizes_available": [7,8,9]}'),
+(8, 'スタッドピアス', 6, 35000, '{"material": "gold", "karat": 18, "style": "stud"}');
+
+-- 顧客の追加
+INSERT INTO customers (customer_id, name, membership_level, preferences) VALUES
+(4, '田中誠', 'REGULAR', '{"preferred_materials": ["silver"], "style": "simple"}'),
+(5, '高橋恵子', 'GOLD', '{"preferred_materials": ["gold", "platinum"], "style": "elegant"}');
+
+-- 注文の追加（カスタマイズなしも含む）
+INSERT INTO orders (order_id, customer_id, order_date, total_amount, payment_status) VALUES
+(4, 4, '2024-01-18 14:20:00', 25000, 'COMPLETED'),
+(5, 5, '2024-01-19 11:15:00', 215000, 'COMPLETED'),
+(6, 1, '2024-01-20 16:30:00', 65000, 'COMPLETED'),
+(7, 2, '2024-01-21 13:45:00', 180000, 'COMPLETED'),
+(8, 3, '2024-01-22 10:30:00', 35000, 'COMPLETED');
+
+-- 注文明細の追加（カスタマイズなしのものも含む）
+INSERT INTO order_items (order_id, product_id, quantity, unit_price, customization) VALUES
+(4, 4, 1, 25000, NULL),  -- カスタマイズなし
+(5, 5, 1, 200000, '{"length_adjustment": -1, "clasp_type": "double"}'),
+(5, 8, 1, 15000, NULL),  -- カスタマイズなし
+(6, 6, 1, 65000, NULL),  -- カスタマイズなし
+(7, 7, 1, 180000, '{"size": 8, "engraving": "Forever Love"}'),
+(8, 8, 1, 35000, '{"backing_type": "screw"}');
