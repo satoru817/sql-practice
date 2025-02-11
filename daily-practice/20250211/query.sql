@@ -295,3 +295,103 @@ WHERE json_column->'$.verified_purchase' = true  -- 正しい
 
 私の前回の説明は誤りでした。通常のboolean型を扱う場合は`= true`が正しい書き方です。JSON操作の特殊性と通常のboolean処理を混同してしまいました。申し訳ありません。
 
+--最終的なコード
+
+with review_ranks as (/*それぞれのreviewに親カテゴリーと子カテゴリーでのランクをつけているCTE*/
+    select
+        pc.category_id as parent_category_id,
+        c.category_id,
+        r.review_text,
+        rank() over (partition by c.category_id order by r.review_metadata->>'$.helpful_votes') as rank_in_child,/*子カテゴリ内でのランク*/
+        rank() over (partition by pc.category_id order by r.review_metadata->>'$.helpful_votes') as rank_in_parent/*親カテゴリ内でのランク*/
+    from
+        categories c
+        inner join categories pc on pc.category_id = c.parent_category_id
+        inner join products p on p.category_id = c.category_id
+        inner join reviews r on r.product_id = p.product_id
+),
+top_reviews as (
+    select
+        c.category_id,
+        group_concat(rr.review_text) as top_reviews
+    from
+        categories c
+        inner join review_ranks rr
+            on 
+                case when c.parent_category_id IS NULL then c.category_id = rr.parent_category_id and  rr.rank_in_parent = 1
+                     else c.category_id = rr.category_id and rr.rank_in_child = 1 end
+    group by
+        c.category_id
+),
+child_category_stats as (/*子カテゴリーの基本統計分析CTE*/
+    select
+        c.name,
+        c.category_id as category_id,
+        pc.category_id as parent_category_id,
+        concat(pc.metadata->>'$.display_order','.',c.metadata->>'$.display_order')as display_order,
+        count(distinct p.product_id) as products,
+        count(r.review_id) as reviews,
+        sum(r.rating) as sum_of_rating,
+        count(
+            case when r.review_metadata->>'$.verified_purchase' = 'true' then 1 end
+        )as verified_purchase_reviews
+    from
+        categories c
+        inner join categories pc on pc.category_id = c.parent_category_id
+        inner join products p on p.category_id = c.category_id
+        left join reviews r on r.product_id = p.product_id
+    group by
+        c.name,
+        c.metadata,
+        pc.metadata,
+        pc.category_id,
+        c.category_id
+),
+parent_category_stats as (
+    select
+        c.category_id,
+        c.name,
+        c.metadata->>'$.display_order' as display_order,
+        sum(ccs.products) as products,
+        sum(ccs.reviews) as reviews,
+        sum(ccs.sum_of_rating) as sum_of_rating,
+        sum(ccs.verified_purchase_reviews) as verified_purchase_reviews
+    from
+        categories c
+        inner join child_category_stats ccs
+            on ccs.parent_category_id = c.category_id
+    group by
+        c.category_id,
+        c.name,
+        c.metadata
+)
+select
+    coalesce(pc.name,'親カテゴリー無し') as parent_category,
+    c.name as category,
+    coalesce(pcs.products,ccs.products) as products,
+    coalesce(pcs.reviews, ccs.reviews) as reviews,
+    round(coalesce(pcs.sum_of_rating/nullif(pcs.reviews,0),ccs.sum_of_rating/nullif(ccs.reviews,0)),2) as avg_rating,
+    coalesce(pcs.verified_purchase_reviews,ccs.verified_purchase_reviews) as verified_purchase_reviews,
+    coalesce(pcs.display_order,ccs.display_order) as display_order,
+    coalesce(tr.top_reviews,'レビュー無し') as top_reviews
+from
+    categories c
+    left join categories pc on pc.category_id = c.parent_category_id
+    left join top_reviews tr on tr.category_id = c.category_id
+    left join parent_category_stats pcs on pcs.category_id = c.category_id
+    left join child_category_stats ccs on ccs.category_id = c.category_id
+order by
+    display_order asc;
+
+
+--実行結果
+
+|parent_category|category   |products|reviews|avg_rating|verified_purchase_reviews|display_order|top_reviews            |
+|---------------|-----------|--------|-------|----------|-------------------------|-------------|-----------------------|
+|親カテゴリー無し       |Electronics|2       |3      |4.67      |3                        |1            |Great phone!           |
+|Electronics    |Smartphones|1       |2      |4.5       |2                        |1.1          |Great phone!           |
+|Electronics    |Laptops    |1       |1      |5         |1                        |1.2          |Perfect for development|
+|親カテゴリー無し       |Books      |2       |2      |4.5       |1                        |2            |Excellent resource     |
+|Books          |Programming|2       |2      |4.5       |1                        |2.1          |Excellent resource     |
+
+
