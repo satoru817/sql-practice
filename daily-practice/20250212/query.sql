@@ -25,7 +25,7 @@
 - カテゴリーの階層はJOINで結合
 - NULL値の処理に注意
 
---私の解答（簡単すぎん？）
+--私の解答
 select
     p.name,
     c.name as category,
