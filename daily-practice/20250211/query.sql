@@ -333,7 +333,7 @@ child_category_stats as (/*子カテゴリーの基本統計分析CTE*/
         count(r.review_id) as reviews,
         sum(r.rating) as sum_of_rating,
         count(
-            case when r.review_metadata->>'$.verified_purchase' = 'true' then 1 end
+            case when r.review_metadata->>'$.verified_purchase' = 'true' then 1 end/*ここに注意*/
         )as verified_purchase_reviews
     from
         categories c
