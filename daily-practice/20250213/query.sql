@@ -116,8 +116,162 @@ from
 
 引き続き2問目、3問目にチャレンジしてみましょう！
 
-
+--感想
+json_containsを利用するとき'"文字列"'というようにしないと動作しなかった。
     
+json_contains での文字列比較で `'"消化器科"'` のように二重引用符が必要な理由について説明します。
+
+これはJSON形式の仕様に関係しています：
+
+1. **JSONの文字列表現**
+   - JSONでは文字列は必ず二重引用符(`"`)で囲む必要があります
+   - 例：`["内科", "消化器科"]` は有効なJSON
+   - `['内科', '消化器科']` は無効なJSON（シングルクォートは不可）
+
+2. **json_containsの動作**
+   - 第2引数は有効なJSON値として評価される必要がある
+   - `json_contains(specialties, '消化器科')` → 失敗
+     - `'消化器科'` は単なる文字列でJSONとして無効
+   - `json_contains(specialties, '"消化器科"')` → 成功
+     - `'"消化器科"'` は `"消化器科"` というJSON文字列として評価される
+
+具体例：
+```sql
+-- 正しい使用方法
+json_contains(specialties, '"消化器科"')
+
+-- 間違った使用方法
+json_contains(specialties, '消化器科')  -- JSONとして無効
+```
+
+このため、JSON配列内の文字列を検索する場合は、必ず検索文字列を二重引用符で囲み、それ全体をシングルクォートで囲む必要があります。
+
+2. 内科系の診療（primaryが"内科"で始まる）について、患者の年代別（10代、20代...）の診療件数と、最も多く処方された薬剤TOP3を抽出してください。その際、処方箋が存在しない診療も件数には含めてください。
+
+--まず年代をとってくる実験
+    select
+        p.patient_id,
+        concat((timestampdiff(year,p.birth_date,curdate()) DIV 10)*10,'代') as age_group
+    from
+        patients p;
+
+|patient_id|age_group|
+|----------|---------|
+|1         |30代      |
+|2         |30代      |
+|3         |20代      |
+|4         |40代      |
+|5         |20代      |
+|6         |30代      |
+
+--うまく言った これをcteとして使おう。
+
+
+with age_calc as (
+    select
+        p.patient_id,
+        concat((timestampdiff(year,p.birth_date,curdate()) DIV 10)*10,'代') as age_group
+    from
+        patients p
+),
+record_stats as (
+    select
+        ac.age_group,
+        count(mr.record_id) as records
+    from
+        age_calc ac
+        inner join medical_records mr on mr.patient_id = ac.patient_id
+    group by
+        ac.age_group
+),
+medicine_stats as (
+    select
+        ac.age_group,
+        pjt.medicine_name,
+        sum(cast(replace(pjt.medicine_amount,'mg','')as unsigned)) as total_amount
+    from
+        age_calc ac
+        inner join medical_records mr on mr.patient_id = ac.patient_id
+        inner join prescriptions p on p.record_id = mr.record_id
+        inner join json_table(
+            p.medicines,
+            '$[*]' columns(
+                medicine_name varchar(100) path '$.name',
+                medicine_amount varchar(20) path '$.amount'
+            
+             )
+        ) as pjt
+    group by
+        ac.age_group,
+        pjt.medicine_name
+),
+medicine_ranks as (
+    select
+        age_group,
+        rank() over (partition by age_group order by total_amount desc) as rank_in_age_group
+    from
+        medicine_stats
+)
+select
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

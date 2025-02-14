@@ -39,7 +39,7 @@ with cancel_stats as (
                 pat.patient_id,
                 pat.name,
                 pat.birth_date,
-                pat.blood_type
+                
 )
 select
     cs.*
