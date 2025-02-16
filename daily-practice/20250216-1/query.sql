@@ -34,13 +34,15 @@ FROM
 	departments d;
 
 --実行結果
-
-|department_name|setting        |
-|---------------|---------------|
-|内科             |X線有り,MRI無し,CT無し|
-|小児科            |X線無し,MRI無し,CT無し|
-|整形外科           |X線有り,MRI有り,CT無し|
-|歯科             |X線無し,MRI無し,CT無し|
+|department_name|setting        |doctors|appointments|real_appointments|
+|---------------|---------------|-------|------------|-----------------|
+|内科             |X線有り,MRI無し,CT無し|3      |11          |10               |
+|小児科            |X線無し,MRI無し,CT無し|2      |6           |4                |
+|循環器内科          |X線有り,MRI有り,CT有り|1      |2           |2                |
+|整形外科           |X線有り,MRI有り,CT無し|1      |2           |2                |
+|皮膚科            |X線無し,MRI無し,CT無し|1      |2           |2                |
+|眼科             |X線無し,MRI無し,CT無し|1      |2           |2                |
+|耳鼻科            |X線無し,MRI無し,CT無し|1      |2           |2                |
 
 
 これでOK.
