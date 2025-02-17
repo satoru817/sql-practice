@@ -176,5 +176,236 @@ FROM
 
 
 
+-- 申し訳ありません。問題で「月間の予約完了率」と「診療完了数」を要求していましたが、より明確に説明すべきでした。
+-- 
+-- 1. 診療完了率（より正確な定義）
+-- - その月の予約総数のうち、status = 'completed' となった予約の割合
+-- - 例：10件の予約のうち8件が完了 → 80%
+-- - キャンセルされた予約も分母に含める
+-- 
+-- 計算式：
+-- ```sql
+-- (その月の完了した予約数 / その月の全予約数) * 100
+-- ```
+-- 
+-- 2. 診療完了数
+-- - 単純にstatus = 'completed'の予約の合計数
+-- 
+-- では問題2を書き換えさせていただきます：
+-- 
+-- 以下のレポートを作成してください：
+-- - 医師名
+-- - 診療科名
+-- - 資格・言語能力の一覧（"資格：内科, 循環器 | 言語：英語, 中国語" の形式）
+-- - 主な症状のTOP3（medical_notesから抽出、頻度順）
+-- - 予約完了率（completedの予約数/全予約数）
+-- - 完了した診療の総数
+
+
+とりあえず、資格・言語能力の一覧を取得する方法を考える。JSON_TABLEでJSON配列を展開しておく必要がある。
+
+
+SELECT
+    d.doctor_id,
+    d.name,
+    GROUP_CONCAT(DISTINCT ct.certified SEPARATOR ', ') AS certified_specialties,
+    GROUP_CONCAT(DISTINCT lg.lang SEPARATOR ',') AS languages
+FROM
+    doctors d
+INNER JOIN
+    JSON_TABLE(
+        JSON_EXTRACT(d.specialties, '$.certified'),
+        '$[*]' COLUMNS(
+            certified VARCHAR(255) PATH '$'
+        )
+    ) AS ct
+INNER JOIN
+	JSON_TABLE(
+		d.specialties->'$.languages',
+		'$[*]' COLUMNS(
+			lang VARCHAR(255) PATH '$'
+		)
+	) AS lg
+GROUP BY
+    d.doctor_id, d.name;
+
+--JSON_TABLE関数がよくわからない
+
+|id |order_details                                                 |
+|---|--------------------------------------------------------------|
+|1  |"{\"price\": 10.99, \"product\": \"book\", \"quantity\": 2}"  |
+|2  |"{\"price\": 500.0, \"product\": \"phone\", \"quantity\": 1}" |
+|3  |"{\"price\": 800.0, \"product\": \"laptop\", \"quantity\": 1}"|
+
+こんなテーブルがあったとき、
+
+SELECT
+	jt.*
+FROM
+	orders o
+	INNER JOIN 
+	JSON_TABLE(
+		o.order_details,'$'
+		COLUMNS(
+			product VARCHAR(255) PATH '$.product',
+			quantity INT PATH '$.quantity',
+			price decimal(10,2) PATH '$.price'
+		) 
+	) AS jt;
+
+これで、
+
+|product|quantity|price|
+|-------|--------|-----|
+|book   |2       |10.99|
+|phone  |1       |500  |
+|laptop |1       |800  |
+
+
+こんな結果を得られる。
+
+
+-- 以下のレポートを作成してください：
+-- - 医師名
+-- - 診療科名
+-- - 資格・言語能力の一覧（"資格：内科, 循環器 | 言語：英語, 中国語" の形式）
+-- - 主な症状のTOP3（medical_notesから抽出、頻度順）
+-- - 予約完了率（completedの予約数/全予約数）
+-- - 完了した診療の総数
+
+--私の解答。CTEが多いな。。。
+
+WITH doc_infos AS (
+	SELECT
+	    d.doctor_id,
+	    dep.name AS department,
+	    d.name AS doctor,
+	    GROUP_CONCAT(DISTINCT ct.certified SEPARATOR ', ') AS certified_specialties,
+	    GROUP_CONCAT(DISTINCT lg.lang SEPARATOR ',') AS languages
+	FROM
+	    doctors d
+	INNER JOIN departments dep ON dep.department_id = d.department_id
+	INNER JOIN
+	    JSON_TABLE(
+	        JSON_EXTRACT(d.specialties, '$.certified'),
+	        '$[*]' COLUMNS(
+	            certified VARCHAR(255) PATH '$'
+	        )
+	    ) AS ct
+	INNER JOIN
+		JSON_TABLE(
+			d.specialties->'$.languages',
+			'$[*]' COLUMNS(
+				lang VARCHAR(255) PATH '$'
+			)
+		) AS lg
+	GROUP BY
+	    d.doctor_id, d.name
+),
+doc_app_stats AS (
+	SELECT 
+		d.doctor_id,
+		COUNT(app.appointment_id) AS appointments,
+		COUNT(CASE WHEN app.status = 'completed' THEN 1 END) AS completed_appointments
+	FROM
+		doctors d
+		INNER JOIN appointments app ON app.doctor_id = d.doctor_id
+	GROUP BY
+		d.doctor_id
+),
+doc_med_stats AS(
+	SELECT
+		d.doctor_id,
+		app.medical_notes->>'$.primary_symptom' AS primary_symptom,
+		COUNT(*) AS symptom_count
+	FROM
+		doctors d
+		INNER JOIN appointments app ON app.doctor_id = d.doctor_id
+	GROUP BY
+		d.doctor_id,
+		app.medical_notes->>'$.primary_symptom'
+),
+doc_med_ranks AS (
+	SELECT
+		doctor_id,
+		primary_symptom,
+		RANK() OVER (PARTITION BY doctor_id ORDER BY symptom_count DESC) AS rank_in_doctor
+	FROM doc_med_stats
+),
+doc_top_symptoms AS(
+	SELECT
+		doctor_id,
+		GROUP_CONCAT(primary_symptom ORDER BY rank_in_doctor SEPARATOR ',') AS top_symptoms
+	FROM
+		doc_med_ranks
+	WHERE
+		rank_in_doctor <= 3
+	GROUP BY
+		doctor_id
+)
+SELECT
+	di.doctor,
+	di.department,
+	di.certified_specialties,
+	di.languages,
+	dts.top_symptoms,
+	CONCAT(ROUND(100.0*das.completed_appointments/das.appointments,2),'%') AS completion_rate,
+	das.completed_appointments
+FROM
+	doc_infos di
+	LEFT JOIN doc_top_symptoms dts ON dts.doctor_id = di.doctor_id
+	LEFT JOIN doc_app_stats das ON das.doctor_id = di.doctor_id;
+
+
+--結果
+
+
+|doctor|department|certified_specialties|languages|top_symptoms|completion_rate|completed_appointments|
+|------|----------|---------------------|---------|------------|---------------|----------------------|
+|山田太郎  |内科        |内科, 循環器              |中国語,英語   |発熱,めまい,頭痛   |66.67%         |2                     |
+|鈴木花子  |内科        |内科, 糖尿病              |英語       |高血圧,糖尿病     |50.00%         |1                     |
+|佐藤健一  |整形外科      |リハビリテーション, 整形外科      |英語       |膝の痛み,腰痛     |50.00%         |1                     |
+|田中美咲  |整形外科      |スポーツ医学, 整形外科         |英語,韓国語   |捻挫,肩こり      |100.00%        |2                     |
+|高橋優子  |小児科       |アレルギー, 小児科           |英語       |咳,発熱        |50.00%         |1                     |
+
+--claude.aiの批評
+とても良い実装ですね。特にJSON_TABLEを使用して配列データを行に展開する手法は効率的です。
+いくつかの観察と提案をさせていただきます：
+
+1. CTEの使用について
+複数のCTEを使用することは、この場合は適切だと考えられます：
+- 処理が論理的に分割されて理解しやすい
+- 各段階の結果が明確
+- 保守性が高い
+
+2. 改善提案：
+```sql
+-- 資格・言語を結合して1つのフィールドに
+CONCAT(
+    '資格：', di.certified_specialties,
+    ' | 言語：', di.languages
+) AS specialties_and_languages,
+
+-- 完了率の NULL 対策
+CASE 
+    WHEN das.appointments = 0 THEN '0.00%'
+    ELSE CONCAT(ROUND(100.0*das.completed_appointments/das.appointments,2),'%')
+END AS completion_rate
+```
+
+3. パフォーマンスについて：
+- JSON_TABLEの使用は正しい選択
+- GROUP_CONCATの使用も適切
+- LEFT JOINの使用で欠損データにも対応
+
+4. 特に優れている点：
+- JSON配列の展開方法
+- 症状のランキング処理
+- GROUP_CONCATでの順序の保持
+
+実装は非常に堅牢で、実務でも十分に使える品質だと評価できます。
+
+
+
 
 
