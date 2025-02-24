@@ -320,3 +320,122 @@ GROUP_CONCAT(
 
 このクエリは非常によく設計されており、特に複雑なJSONデータの処理とランキング計算を効率的に実装している点が評価できます。
 
+
+--  A. 時間帯別の基本統計
+-- 1. 1時間ごとの時間帯区分（9:00-10:00, 14:00-15:00など）
+-- 2. 各時間帯における：
+--    - 予約総数
+--    - 完了した予約数
+--    - キャンセルされた予約数
+--    - キャンセル率（パーセント表示、小数点2桁）
+-- 	
+--    
+
+WITH hour_app_dists AS (
+	SELECT
+		HOUR(start_time) AS start_hour,
+		status
+	FROM
+		appointments
+),
+hour_app_stats AS(
+	SELECT
+		start_hour,
+		status,
+		COUNT(*) AS num
+	FROM
+		hour_app_dists
+	GROUP BY
+		start_hour,
+		status
+)
+SELECT
+	CONCAT(start_hour,'時-',start_hour+1,'時') AS hour_interval,
+	SUM(num) AS total_appointments,
+	MAX(CASE WHEN status = 'completed' THEN num END) AS completed_appointments,
+	MAX(CASE WHEN status='cancelled' THEN num END) AS cancelled_appointments,
+	CASE
+		WHEN SUM(num) = 0 THEN '0.00%'
+		ELSE CONCAT(ROUND(100.0*MAX(CASE WHEN status='cancelled' THEN num END)/SUM(num),2),'%')
+	END AS cancellation_rate
+FROM
+	hour_app_stats
+GROUP BY
+	start_hour;
+
+--実行結果
+|hour_interval|total_appointments|completed_appointments|cancelled_appointments|cancellation_rate|
+|-------------|------------------|----------------------|----------------------|-----------------|
+|9時-10時       |17                |13                    |2                     |11.76%           |
+|10時-11時      |3                 |1                     |2                     |66.67%           |
+|14時-15時      |10                |8                     |2                     |20.00%           |
+
+--AIの改善提案
+
+結果を確認しながら、いくつかの改善点を提案させていただきます：
+
+1. 予約がない時間帯も表示するように改善
+2. 時間表示をより見やすく（09:00-10:00の形式）
+3. キャンセル数がNULLの場合の処理を追加
+
+```sql
+WITH RECURSIVE time_slots AS (
+    SELECT 9 AS hour
+    UNION ALL
+    SELECT hour + 1
+    FROM time_slots
+    WHERE hour < 14
+),
+hour_app_stats AS (
+    SELECT
+        HOUR(start_time) AS start_hour,
+        COUNT(*) AS total_apps,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed_apps,
+        COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled_apps
+    FROM
+        appointments
+    GROUP BY
+        HOUR(start_time)
+)
+SELECT
+    CONCAT(
+        LPAD(t.hour, 2, '0'),
+        ':00-',
+        LPAD(t.hour + 1, 2, '0'),
+        ':00'
+    ) AS time_slot,
+    COALESCE(has.total_apps, 0) AS total_appointments,
+    COALESCE(has.completed_apps, 0) AS completed_appointments,
+    COALESCE(has.cancelled_apps, 0) AS cancelled_appointments,
+    CASE 
+        WHEN COALESCE(has.total_apps, 0) = 0 THEN '0.00%'
+        ELSE CONCAT(
+            ROUND(
+                100.0 * COALESCE(has.cancelled_apps, 0) / 
+                COALESCE(has.total_apps, 0), 
+                2
+            ),
+            '%'
+        )
+    END AS cancellation_rate
+FROM
+    time_slots t
+    LEFT JOIN hour_app_stats has ON has.start_hour = t.hour
+ORDER BY
+    t.hour;
+```
+
+この改善により：
+
+1. 9時から14時までのすべての時間帯が表示されます
+2. 時刻表示が「09:00-10:00」のような標準的なフォーマットになります
+3. データがない時間帯も0として適切に表示されます
+4. 結果が時間順に並びます
+
+これにより、より完全で読みやすいレポートが作成できます。
+
+
+
+
+
+
