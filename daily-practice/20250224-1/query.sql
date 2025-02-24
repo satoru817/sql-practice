@@ -132,3 +132,191 @@ ROUND(
 
 このクエリは非常に良く実装されていますが、上記のような改善を加えることで、より堅牢で保守性の高いものになると考えます。
 
+
+-- 2. 医師別の詳細統計
+--    - 医師名と所属診療科
+--    - 資格・言語情報（整形して表示）
+--    - 診療実績（患者数、完了率）
+--    - 主な症状TOP3（出現回数順）
+--    - 平均診療時間
+--    - 総診療収入と保険適用率
+-- 	
+-- 	
+
+WITH doc_basic_infos AS(
+	SELECT
+		doc.doctor_id,
+		doc.name AS doctor_name,
+		dep.name AS department_name,
+		CONCAT('専門: ',GROUP_CONCAT(DISTINCT ct.certified),' | 言語: ',GROUP_CONCAT(DISTINCT lg.lang)) AS specialties
+	FROM
+		doctors doc
+		LEFT JOIN departments dep ON dep.department_id = doc.department_id
+		INNER JOIN JSON_TABLE(
+			doc.specialties->'$.certified','$[*]'
+			COLUMNS(
+				certified VARCHAR(255) PATH '$'
+			)
+		)AS ct
+		INNER JOIN JSON_TABLE(
+			doc.specialties->'$.languages','$[*]'
+			COLUMNS(
+				lang VARCHAR(255) PATH '$'
+			)
+		)AS lg
+	GROUP BY
+		doc.doctor_id,
+		doc.name,
+		dep.name
+),
+doc_symptom_stats AS (
+	SELECT
+		doc.doctor_id,
+		app.medical_notes->>'$.primary_symptom' AS symptom,
+		COUNT(*) AS symptom_count
+	FROM
+		doctors doc
+		INNER JOIN appointments app ON app.doctor_id = doc.doctor_id
+	GROUP BY
+		doc.doctor_id,
+		app.medical_notes->>'$.primary_symptom'
+),
+doc_symptom_ranks AS(
+	SELECT
+		doctor_id,
+		symptom,
+		RANK() OVER (PARTITION BY doctor_id ORDER BY symptom_count DESC) AS rank_in_doctor
+	FROM
+		doc_symptom_stats
+),
+doc_top_symptoms AS(
+	SELECT
+		doctor_id,
+		GROUP_CONCAT(symptom ORDER BY rank_in_doctor ASC) AS top_symptom
+	FROM
+		doc_symptom_ranks
+	WHERE
+		rank_in_doctor <= 3
+	GROUP BY
+		doctor_id
+),
+doc_app_stats AS(
+	SELECT
+		doc.doctor_id,
+		COUNT(DISTINCT app.patient_id) AS patients,
+		CASE
+			WHEN COUNT(app.appointment_id) = 0 THEN '0.00%'
+			ELSE CONCAT(ROUND(100.0*COUNT(CASE WHEN app.status='completed' THEN 1 END)/COUNT(app.appointment_id),2),'%')
+		END AS completion_rate,
+		AVG(TIMESTAMPDIFF(MINUTE,app.start_time,app.end_time)) AS avg_consultation_time,
+		SUM(CASE WHEN app.status = 'completed' THEN app.billing_amount END) AS sum_billing,
+		CASE
+			WHEN COUNT(app.appointment_id)=0 THEN '0.00%'
+			ELSE CONCAT(ROUND(100.0*COUNT(CASE WHEN app.insurance_applied THEN 1 END)/COUNT(app.appointment_id),2),'%')
+		END AS insurance_application_rate
+	FROM
+		doctors doc
+		LEFT JOIN appointments app ON doc.doctor_id = app.doctor_id
+	GROUP BY
+		doc.doctor_id
+)
+SELECT
+	dbi.doctor_name,
+	dbi.department_name,
+	dbi.specialties,
+	das.patients,
+	das.completion_rate,
+	das.insurance_application_rate,
+	dts.top_symptom,
+	das.avg_consultation_time,
+	das.sum_billing,
+	das.insurance_application_rate
+FROM
+	doc_basic_infos dbi
+	LEFT JOIN doc_top_symptoms dts ON dts.doctor_id = dbi.doctor_id
+	LEFT JOIN doc_app_stats das ON das.doctor_id = dbi.doctor_id;
+
+--実行結果
+|doctor_name|department_name|specialties                 |patients|completion_rate|insurance_application_rate|top_symptom|avg_consultation_time|sum_billing|insurance_application_rate|
+|-----------|---------------|----------------------------|--------|---------------|--------------------------|-----------|---------------------|-----------|--------------------------|
+|山田太郎       |内科             |専門: 内科,循環器 | 言語: 中国語,英語     |4       |75.00%         |75.00%                    |頭痛,発熱,めまい  |23.3333              |15,000     |75.00%                    |
+|鈴木花子       |内科             |専門: 内科,糖尿病 | 言語: 英語         |3       |66.67%         |66.67%                    |高血圧,糖尿病    |25                   |10,000     |66.67%                    |
+|佐藤健一       |整形外科           |専門: リハビリテーション,整形外科 | 言語: 英語 |3       |66.67%         |66.67%                    |腰痛,膝の痛み    |42.5                 |15,000     |66.67%                    |
+|田中美咲       |整形外科           |専門: スポーツ医学,整形外科 | 言語: 英語,韓国語|3       |66.67%         |66.67%                    |捻挫,肩こり     |30                   |13,000     |66.67%                    |
+|高橋優子       |小児科            |専門: アレルギー,小児科 | 言語: 英語      |3       |66.67%         |66.67%                    |発熱,咳       |20                   |9,000      |66.67%                    |
+|伊藤誠        |眼科             |専門: 眼科 | 言語: スペイン語,英語       |3       |66.67%         |66.67%                    |目の痛み,かすみ目  |22.5                 |11,000     |66.67%                    |
+|渡辺和子       |皮膚科            |専門: アレルギー,皮膚科 | 言語: フランス語,英語|3       |100.00%        |100.00%                   |アレルギー,湿疹   |31.6667              |18,000     |100.00%                   |
+|中村哲也       |耳鼻咽喉科          |専門: アレルギー,耳鼻咽喉科 | 言語: 英語    |3       |66.67%         |66.67%                    |耳鳴り,めまい    |22.5                 |12,500     |66.67%                    |
+|小林正人       |循環器内科          |専門: 内科,循環器内科 | 言語: ドイツ語,英語  |3       |100.00%        |100.00%                   |動悸,胸痛      |33.3333              |20,000     |100.00%                   |
+|加藤明美       |消化器内科          |専門: 内科,消化器内科 | 言語: 中国語,英語   |2       |50.00%         |50.00%                    |腹痛         |35                   |7,000      |50.00%                    |
+
+
+
+--AIの採点
+
+すばらしい実装ですね。クエリの重要なポイントを分析させていただきます：
+
+### 優れている点
+
+1. **CTEの効果的な分割**
+   - doc_basic_infos: 基本情報と専門分野の整形
+   - doc_symptom_stats: 症状別の集計
+   - doc_symptom_ranks: 症状のランキング付け
+   - doc_app_stats: 予約関連の統計
+
+2. **JSON_TABLEの適切な活用**
+```sql
+INNER JOIN JSON_TABLE(
+    doc.specialties->'$.certified','$[*]'
+    COLUMNS(
+        certified VARCHAR(255) PATH '$'
+    )
+)AS ct
+```
+- 配列データの適切な展開
+- パスの正確な指定
+
+3. **Window関数の効果的な使用**
+```sql
+RANK() OVER (PARTITION BY doctor_id ORDER BY symptom_count DESC) AS rank_in_doctor
+```
+- 医師ごとの症状ランキングを効率的に計算
+
+4. **NULL/ゼロ値の堅牢な処理**
+```sql
+CASE
+    WHEN COUNT(app.appointment_id) = 0 THEN '0.00%'
+    ELSE CONCAT(ROUND(100.0*COUNT(...)/COUNT(...),2),'%')
+END
+```
+
+### 改善提案
+
+1. **平均診療時間の表示形式**
+```sql
+CONCAT(
+    FLOOR(AVG(TIMESTAMPDIFF(MINUTE,app.start_time,app.end_time))), 
+    '分'
+) AS avg_consultation_time
+```
+
+2. **金額のフォーマット**
+```sql
+FORMAT(SUM(CASE WHEN app.status = 'completed' THEN app.billing_amount END), 0) AS sum_billing
+```
+
+3. **TOP3症状の区切り文字の改善**
+```sql
+GROUP_CONCAT(
+    CONCAT(rank_in_doctor, '. ', symptom) 
+    ORDER BY rank_in_doctor ASC 
+    SEPARATOR ' → '
+) AS top_symptom
+```
+
+4. **パフォーマンス最適化**
+- completed状態の予約のみを対象とした診療時間計算
+- インデックスを活用したJOIN順序の最適化
+
+このクエリは非常によく設計されており、特に複雑なJSONデータの処理とランキング計算を効率的に実装している点が評価できます。
+
