@@ -435,7 +435,215 @@ ORDER BY
 これにより、より完全で読みやすいレポートが作成できます。
 
 
+--  B. 診療科別の時間帯分析
+-- 1. 各診療科の時間帯ごとの：
+--    - 予約件数
+--    - 平均診療時間（分単位）
+--    - 最長診療時間（分単位）
+--    - 最短診療時間（分単位）
+
+WITH RECURSIVE time_slots AS (
+	SELECT 9 AS start_hour
+	UNION ALL
+	SELECT start_hour+1
+	FROM time_slots
+	WHERE start_hour < 14
+)
+SELECT
+	CONCAT(
+		LPAD(ts.start_hour,2,'0'),
+		':00-',
+		LPAD(ts.start_hour+1,2,'0'),
+		':00'
+	) AS time_slot,
+	dep.name AS department_name,
+	COUNT(app.appointment_id) AS appointments,
+	CONCAT(ROUND(AVG(TIMESTAMPDIFF(MINUTE,app.start_time,app.end_time)),2),'分') AS avg_counselling_time,
+	CONCAT(MAX(TIMESTAMPDIFF(MINUTE,app.start_time,app.end_time)),'分') AS max_counselling_time,
+	CONCAT(MIN(TIMESTAMPDIFF(MINUTE,app.start_time,app.end_time)),'分') AS min_counselling_time
+FROM
+	time_slots ts
+	LEFT JOIN appointments app ON HOUR(app.start_time) = ts.start_hour
+	LEFT JOIN doctors doc ON doc.doctor_id = app.doctor_id
+	LEFT JOIN departments dep ON dep.department_id = doc.department_id
+GROUP BY
+	ts.start_hour,
+	dep.name
+ORDER BY 
+	ts.start_hour ASC,
+	dep.name;
+--実行結果
+|time_slot  |department_name|appointments|avg_counselling_time|max_counselling_time|min_counselling_time|
+|-----------|---------------|------------|--------------------|--------------------|--------------------|
+|09:00-10:00|内科             |4           |23.33分              |25分                 |20分                 |
+|09:00-10:00|小児科            |2           |20.00分              |20分                 |20分                 |
+|09:00-10:00|循環器内科          |1           |40.00分              |40分                 |40分                 |
+|09:00-10:00|整形外科           |3           |35.00分              |45分                 |30分                 |
+|09:00-10:00|消化器内科          |1           |35.00分              |35分                 |35分                 |
+|09:00-10:00|皮膚科            |2           |30.00分              |30分                 |30分                 |
+|09:00-10:00|眼科             |2           |25.00分              |25分                 |25分                 |
+|09:00-10:00|耳鼻咽喉科          |2           |20.00分              |20分                 |20分                 |
+|10:00-11:00|内科             |1           |                    |                    |                    |
+|10:00-11:00|循環器内科          |1           |30.00分              |30分                 |30分                 |
+|10:00-11:00|整形外科           |1           |                    |                    |                    |
+|11:00-12:00|               |0           |                    |                    |                    |
+|12:00-13:00|               |0           |                    |                    |                    |
+|13:00-14:00|               |0           |                    |                    |                    |
+|14:00-15:00|内科             |2           |25.00分              |25分                 |25分                 |
+|14:00-15:00|小児科            |1           |20.00分              |20分                 |20分                 |
+|14:00-15:00|循環器内科          |1           |30.00分              |30分                 |30分                 |
+|14:00-15:00|整形外科           |2           |40.00分              |40分                 |40分                 |
+|14:00-15:00|消化器内科          |1           |                    |                    |                    |
+|14:00-15:00|皮膚科            |1           |35.00分              |35分                 |35分                 |
+|14:00-15:00|眼科             |1           |20.00分              |20分                 |20分                 |
+|14:00-15:00|耳鼻咽喉科          |1           |25.00分              |25分                 |25分                 |
 
 
 
+--AIの採点
+
+クエリの結果を確認しました。以下のように改善を提案させていただきます：
+
+```sql
+WITH RECURSIVE time_slots AS (
+    SELECT 9 AS start_hour
+    UNION ALL
+    SELECT start_hour + 1
+    FROM time_slots
+    WHERE start_hour < 14
+),
+department_hours AS (
+    -- 診療科と時間帯の全組み合わせを生成
+    SELECT 
+        ts.start_hour,
+        d.department_id,
+        d.name AS department_name
+    FROM time_slots ts
+    CROSS JOIN departments d
+    WHERE d.is_active = true
+),
+appointment_stats AS (
+    -- 予約データの集計
+    SELECT
+        HOUR(app.start_time) AS hour,
+        dep.department_id,
+        COUNT(app.appointment_id) AS total_appointments,
+        AVG(CASE 
+            WHEN app.status = 'completed' 
+            THEN TIMESTAMPDIFF(MINUTE, app.start_time, app.end_time) 
+        END) AS avg_duration,
+        MAX(CASE 
+            WHEN app.status = 'completed' 
+            THEN TIMESTAMPDIFF(MINUTE, app.start_time, app.end_time)
+        END) AS max_duration,
+        MIN(CASE 
+            WHEN app.status = 'completed' 
+            THEN TIMESTAMPDIFF(MINUTE, app.start_time, app.end_time)
+        END) AS min_duration
+    FROM appointments app
+    INNER JOIN doctors doc ON doc.doctor_id = app.doctor_id
+    INNER JOIN departments dep ON dep.department_id = doc.department_id
+    WHERE app.status = 'completed'
+    GROUP BY 
+        HOUR(app.start_time),
+        dep.department_id
+)
+SELECT
+    CONCAT(
+        LPAD(dh.start_hour, 2, '0'),
+        ':00-',
+        LPAD(dh.start_hour + 1, 2, '0'),
+        ':00'
+    ) AS time_slot,
+    dh.department_name,
+    COALESCE(aps.total_appointments, 0) AS appointments,
+    CASE 
+        WHEN aps.avg_duration IS NULL THEN '-'
+        ELSE CONCAT(ROUND(aps.avg_duration, 0), '分')
+    END AS avg_counselling_time,
+    CASE 
+        WHEN aps.max_duration IS NULL THEN '-'
+        ELSE CONCAT(aps.max_duration, '分')
+    END AS max_counselling_time,
+    CASE 
+        WHEN aps.min_duration IS NULL THEN '-'
+        ELSE CONCAT(aps.min_duration, '分')
+    END AS min_counselling_time
+FROM
+    department_hours dh
+    LEFT JOIN appointment_stats aps ON 
+        aps.hour = dh.start_hour AND 
+        aps.department_id = dh.department_id
+ORDER BY 
+    dh.start_hour,
+    dh.department_name;
+```
+
+主な改善点：
+
+1. 値がNULLの場合は'-'で表示
+2. status = 'completed' の予約のみを集計対象に
+3. 診療科と時間帯の全組み合わせを生成（データがない時間帯も表示）
+4. 時間の計算を完了した予約のみに限定
+5. より正確な平均時間の計算（NULL値を除外）
+
+このクエリにより：
+- すべての時間帯と診療科の組み合わせが表示されます
+- データがない場合は明確に'-'として表示されます
+- キャンセルされた予約は診療時間の計算から除外されます
+- より正確な統計情報が得られます
+
+
+--実行結果
+
+|time_slot  |department_name|appointments|avg_counselling_time|max_counselling_time|min_counselling_time|
+|-----------|---------------|------------|--------------------|--------------------|--------------------|
+|09:00-10:00|内科             |3           |23分                 |25分                 |20分                 |
+|09:00-10:00|小児科            |1           |20分                 |20分                 |20分                 |
+|09:00-10:00|循環器内科          |1           |40分                 |40分                 |40分                 |
+|09:00-10:00|整形外科           |3           |35分                 |45分                 |30分                 |
+|09:00-10:00|消化器内科          |1           |35分                 |35分                 |35分                 |
+|09:00-10:00|皮膚科            |2           |30分                 |30分                 |30分                 |
+|09:00-10:00|眼科             |1           |25分                 |25分                 |25分                 |
+|09:00-10:00|耳鼻咽喉科          |1           |20分                 |20分                 |20分                 |
+|10:00-11:00|内科             |0           |-                   |-                   |-                   |
+|10:00-11:00|小児科            |0           |-                   |-                   |-                   |
+|10:00-11:00|循環器内科          |1           |30分                 |30分                 |30分                 |
+|10:00-11:00|整形外科           |0           |-                   |-                   |-                   |
+|10:00-11:00|消化器内科          |0           |-                   |-                   |-                   |
+|10:00-11:00|皮膚科            |0           |-                   |-                   |-                   |
+|10:00-11:00|眼科             |0           |-                   |-                   |-                   |
+|10:00-11:00|耳鼻咽喉科          |0           |-                   |-                   |-                   |
+|11:00-12:00|内科             |0           |-                   |-                   |-                   |
+|11:00-12:00|小児科            |0           |-                   |-                   |-                   |
+|11:00-12:00|循環器内科          |0           |-                   |-                   |-                   |
+|11:00-12:00|整形外科           |0           |-                   |-                   |-                   |
+|11:00-12:00|消化器内科          |0           |-                   |-                   |-                   |
+|11:00-12:00|皮膚科            |0           |-                   |-                   |-                   |
+|11:00-12:00|眼科             |0           |-                   |-                   |-                   |
+|11:00-12:00|耳鼻咽喉科          |0           |-                   |-                   |-                   |
+|12:00-13:00|内科             |0           |-                   |-                   |-                   |
+|12:00-13:00|小児科            |0           |-                   |-                   |-                   |
+|12:00-13:00|循環器内科          |0           |-                   |-                   |-                   |
+|12:00-13:00|整形外科           |0           |-                   |-                   |-                   |
+|12:00-13:00|消化器内科          |0           |-                   |-                   |-                   |
+|12:00-13:00|皮膚科            |0           |-                   |-                   |-                   |
+|12:00-13:00|眼科             |0           |-                   |-                   |-                   |
+|12:00-13:00|耳鼻咽喉科          |0           |-                   |-                   |-                   |
+|13:00-14:00|内科             |0           |-                   |-                   |-                   |
+|13:00-14:00|小児科            |0           |-                   |-                   |-                   |
+|13:00-14:00|循環器内科          |0           |-                   |-                   |-                   |
+|13:00-14:00|整形外科           |0           |-                   |-                   |-                   |
+|13:00-14:00|消化器内科          |0           |-                   |-                   |-                   |
+|13:00-14:00|皮膚科            |0           |-                   |-                   |-                   |
+|13:00-14:00|眼科             |0           |-                   |-                   |-                   |
+|13:00-14:00|耳鼻咽喉科          |0           |-                   |-                   |-                   |
+|14:00-15:00|内科             |2           |25分                 |25分                 |25分                 |
+|14:00-15:00|小児科            |1           |20分                 |20分                 |20分                 |
+|14:00-15:00|循環器内科          |1           |30分                 |30分                 |30分                 |
+|14:00-15:00|整形外科           |1           |40分                 |40分                 |40分                 |
+|14:00-15:00|消化器内科          |0           |-                   |-                   |-                   |
+|14:00-15:00|皮膚科            |1           |35分                 |35分                 |35分                 |
+|14:00-15:00|眼科             |1           |20分                 |20分                 |20分                 |
+|14:00-15:00|耳鼻咽喉科          |1           |25分                 |25分                 |25分                 |
 
