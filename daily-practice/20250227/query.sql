@@ -182,16 +182,210 @@ WITH repeater_stats AS (
 この分析から、新規顧客の初回購入額が比較的高く、リピーターの購入額が徐々に小さくなる傾向が読み取れます。これは顧客の購買サイクルや製品のライフサイクルに関する洞察を提供します。
 
 
+-- 問題2のカテゴリクロス購入分析では、以下のような出力を期待しています：
+
+複数カテゴリから購入しているクロスショッピング顧客と、単一カテゴリからのみ購入しているシングルカテゴリ顧客を比較するレポートです。具体的には以下の項目を含みます：
+
+1. **顧客グループ** - 「複数カテゴリ購入顧客」と「単一カテゴリ購入顧客」の2グループ
+2. **顧客数** - 各グループに属する顧客の数
+3. **比率(%)** - 全顧客に対する各グループの割合
+4. **平均購入額** - 各グループの顧客あたりの平均購入金額
+5. **平均購入頻度** - 各グループの顧客あたりの平均購入回数
+
+例えばこのような形式です：
+
+```
+| 顧客グループ         | 顧客数 | 比率(%) | 平均購入額(円) | 平均購入頻度 |
+|-------------------|-------|--------|--------------|-----------|
+| 複数カテゴリ購入顧客   | 9     | 60.0   | 85,333.33    | 4.2       |
+| 単一カテゴリ購入顧客   | 6     | 40.0   | 38,333.33    | 1.8       |
+```
+
+この分析によって、複数カテゴリから購入する顧客と単一カテゴリのみから購入する顧客の行動パターンの違いを把握することができます。通常、複数カテゴリから購入する顧客の方が、顧客生涯価値が高い傾向があるため、マーケティング戦略の重要な指標となります。
+
+-- 2. カテゴリクロス購入分析：複数のカテゴリから購入している顧客と単一カテゴリのみから購入している
+-- 顧客の比較を行ってください。比較項目は顧客数、平均購入額、平均購入頻度です。
+
+WITH cust_category_count AS (
+	SELECT
+		c.customer_id,
+		CASE
+			WHEN COUNT(DISTINCT p.category) > 1 THEN true
+			ELSE false
+		END AS multiple,
+		COUNT(DISTINCT o.order_id) AS orders
+	FROM
+		customers c
+		INNER JOIN orders o ON o.customer_id = c.customer_id
+		INNER JOIN order_items oi ON oi.order_id = o.order_id
+		INNER JOIN products p ON p.product_id = oi.product_id
+	GROUP BY
+		c.customer_id
+)
+SELECT
+	DISTINCT 
+	CASE 
+		WHEN ccc.multiple THEN '複数カテゴリ購入顧客'
+		ELSE '単一カテゴリ購入顧客'
+	END AS 顧客グループ,
+	COUNT(DISTINCT ccc.customer_id) OVER (PARTITION BY ccc.multiple)AS 顧客数,
+	ROUND(100.0*COUNT(DISTINCT ccc.customer_id) OVER (PARTITION BY ccc.multiple)/COUNT(DISTINCT ccc.customer_id) OVER (),1) AS 比率,
+	ROUND(AVG(o.total_amount) OVER (PARTITION BY ccc.multiple)) AS 平均購入額,
+	ROUND(AVG(ccc.orders) OVER (PARTITION BY ccc.multiple),1) AS 平均購入頻度
+FROM
+	cust_category_count ccc
+	INNER JOIN orders o ON o.customer_id = ccc.customer_id;
+
+これで行けると思ったが、だめだった。以下のエラーが出た。COUNT(DISTINCT ...) OVER (...)のようなwindow関数とDISTINCTを組み合わせたものを許してくれないようだ。
+
+
+--リトライ
+
+WITH cust_category_count AS (
+	SELECT
+		c.customer_id,
+		CASE
+			WHEN COUNT(DISTINCT p.category) > 1 THEN true
+			ELSE false
+		END AS multiple,
+		COUNT(DISTINCT o.order_id) AS orders
+	FROM
+		customers c
+		INNER JOIN orders o ON o.customer_id = c.customer_id
+		INNER JOIN order_items oi ON oi.order_id = o.order_id
+		INNER JOIN products p ON p.product_id = oi.product_id
+	GROUP BY
+		c.customer_id
+),
+group_basic_stats AS (
+	SELECT
+		DISTINCT
+		ccc.multiple,
+		COUNT(ccc.customer_id) OVER (PARTITION BY ccc.multiple)AS customer_num,
+		ROUND(100.0*COUNT(ccc.customer_id) OVER (PARTITION BY ccc.multiple)/COUNT(ccc.customer_id) OVER (),1) AS ratio,
+		ROUND(AVG(ccc.orders) OVER (PARTITION BY ccc.multiple),1) AS avg_count
+	FROM
+		cust_category_count ccc
+),
+group_amount_stats AS(
+	SELECT
+		ccc.multiple,
+		ROUND(AVG(o.total_amount)) AS avg_total_amount
+	FROM
+		cust_category_count ccc
+		INNER JOIN orders o ON o.customer_id = ccc.customer_id
+	GROUP BY
+		ccc.multiple
+)
+SELECT
+	CASE 
+		WHEN gbs.multiple THEN '複数カテゴリ購入顧客'
+		ELSE '単一カテゴリ購入顧客'
+	END AS 顧客グループ,
+	gbs.customer_num AS 顧客数,
+	gbs.ratio AS 比率,
+	gas.avg_total_amount AS 平均購入金額,
+	gbs.avg_count AS 平均購入頻度
+FROM
+	group_basic_stats gbs
+	INNER JOIN group_amount_stats gas ON gas.multiple = gbs.multiple;
+
+
+|顧客グループ    |顧客数|比率  |平均購入金額|平均購入頻度|
+|----------|---|----|------|------|
+|単一カテゴリ購入顧客|7  |46.7|60,895|2.7   |
+|複数カテゴリ購入顧客|8  |53.3|53,714|3.5   |
 
 
 
+(円)などを表示するためにはバッククオートを利用すると良いことがわかった。最終的な解答は以下
 
 
+-- 2. カテゴリクロス購入分析：複数のカテゴリから購入している顧客と単一カテゴリのみから購入している
+-- 顧客の比較を行ってください。比較項目は顧客数、平均購入額、平均購入頻度です。
 
+WITH cust_category_count AS (
+	SELECT
+		c.customer_id,
+		CASE
+			WHEN COUNT(DISTINCT p.category) > 1 THEN true
+			ELSE false
+		END AS multiple,
+		COUNT(DISTINCT o.order_id) AS orders
+	FROM
+		customers c
+		INNER JOIN orders o ON o.customer_id = c.customer_id
+		INNER JOIN order_items oi ON oi.order_id = o.order_id
+		INNER JOIN products p ON p.product_id = oi.product_id
+	GROUP BY
+		c.customer_id
+),
+group_basic_stats AS (
+	SELECT
+		DISTINCT
+		ccc.multiple,
+		COUNT(ccc.customer_id) OVER (PARTITION BY ccc.multiple)AS customer_num,
+		ROUND(100.0*COUNT(ccc.customer_id) OVER (PARTITION BY ccc.multiple)/COUNT(ccc.customer_id) OVER (),1) AS ratio,
+		ROUND(AVG(ccc.orders) OVER (PARTITION BY ccc.multiple),1) AS avg_count
+	FROM
+		cust_category_count ccc
+),
+group_amount_stats AS(
+	SELECT
+		ccc.multiple,
+		ROUND(AVG(o.total_amount)) AS avg_total_amount
+	FROM
+		cust_category_count ccc
+		INNER JOIN orders o ON o.customer_id = ccc.customer_id
+	GROUP BY
+		ccc.multiple
+)
+SELECT
+	CASE 
+		WHEN gbs.multiple THEN '複数カテゴリ購入顧客'
+		ELSE '単一カテゴリ購入顧客'
+	END AS 顧客グループ,
+	gbs.customer_num AS 顧客数,
+	gbs.ratio AS `比率(%)`,
+	gas.avg_total_amount AS `平均購入金額(円)`,
+	gbs.avg_count AS 平均購入頻度
+FROM
+	group_basic_stats gbs
+	INNER JOIN group_amount_stats gas ON gas.multiple = gbs.multiple;
+	
+|顧客グループ    |顧客数|比率(%)|平均購入金額(円)|平均購入頻度|
+|----------|---|-----|---------|------|
+|単一カテゴリ購入顧客|7  |46.7 |60,895   |2.7   |
+|複数カテゴリ購入顧客|8  |53.3 |53,714   |3.5   |
 
+--AIの講評
 
+あなたの解答は正確で、適切な手法を使用しています。以下にコードの分析を行います：
 
+1. `cust_category_count` CTE:
+   - 各顧客が購入したカテゴリ数を集計し、複数カテゴリ購入かどうかを判定しています
+   - 同時に各顧客の注文回数も集計しています
+   - `COUNT(DISTINCT p.category) > 1`で複数カテゴリ購入かどうかを判定するアプローチは適切です
 
+2. `group_basic_stats` CTE:
+   - ウィンドウ関数を効果的に使用して、グループごとの顧客数と比率を計算しています
+   - `AVG(ccc.orders) OVER (PARTITION BY ccc.multiple)`で平均購入頻度を計算しています
+   - DISTINCTを使ってグループごとに1行だけ取得する手法は効率的です
+
+3. `group_amount_stats` CTE:
+   - グループごとの平均購入金額を計算しています
+   - この部分を別のCTEにすることで、コードの読みやすさが向上しています
+
+4. 最終的なSELECT文:
+   - バッククォートを使用して特殊文字を含むカラム名を適切に処理しています
+   - CASE式を使って boolean値を読みやすい文字列に変換しています
+
+結果から、複数カテゴリ購入顧客は単一カテゴリ購入顧客に比べて：
+- 顧客数の割合が多い（53.3% vs 46.7%）
+- 平均購入頻度が高い（3.5回 vs 2.7回）
+- 平均購入金額は若干低い（53,714円 vs 60,895円）
+
+この分析から、複数カテゴリ購入顧客は来店頻度は高いものの、1回あたりの購入金額は単一カテゴリ購入顧客より少ない傾向があることがわかります。これはマーケティング戦略を立てる上で重要な洞察です。
 
 
 
