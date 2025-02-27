@@ -389,7 +389,58 @@ FROM
 
 
 
+--
+問題3の顧客生涯価値（LTV）分析では、以下のような出力を期待しています：
 
+顧客セグメント別（Premium、Standard、Newなど）に、6ヶ月間の累計購入金額を計算し、比較するレポートです。具体的には以下の項目を含みます：
+
+1. **顧客セグメント** - 各顧客セグメント（例：Premium、Standard、New）
+2. **顧客数** - 各セグメントの顧客数
+3. **総購入額** - 各セグメントの顧客による総購入金額
+4. **平均LTV (6ヶ月)** - 各セグメントの顧客ごとの平均購入金額（6ヶ月累計）
+5. **月別の平均購入額** - 各月の平均購入額（オプション）
+6. **最終月の継続率** - 最初の月から6ヶ月後も購入している顧客の割合（オプション）
+
+例えばこのような形式です：
+
+```
+| 顧客セグメント | 顧客数 | 総購入額(円) | 平均LTV(6ヶ月)(円) | 1月平均(円) | 2月平均(円) | ... | 継続率(%) |
+|------------|-------|------------|-----------------|-----------|-----------|-----|----------|
+| Premium    | 5     | 1,782,000  | 356,400         | 99,750    | 87,250    | ... | 80.0     |
+| Standard   | 7     | 726,000    | 103,714         | 33,571    | 32,429    | ... | 57.1     |
+| New        | 3     | 91,000     | 30,333          | 0         | 28,000    | ... | 33.3     |
+```
+
+この分析により、顧客セグメント間の価値の違いや、時間経過による購買行動の変化を把握することができます。より高価値なセグメントを特定したり、各セグメントに対する効果的なマーケティング戦略を立案するための重要なデータとなります。
+
+-- まず1-4の要件を満たすように書いてみる。
+
+WITH cust_stats AS (
+	SELECT
+		c.customer_id,
+		c.customer_segment,
+		SUM(o.total_amount) AS total_purchase,
+		SUM(
+			CASE
+				WHEN TIMESTAMPDIFF(MONTH,o.order_date,CURDATE()) <= 6 THEN o.total_amount
+			END
+		) AS six_month_sum
+	FROM
+		customers c
+		INNER JOIN orders o ON o.customer_id = c.customer_id
+	GROUP BY
+		c.customer_id,
+		c.customer_segment
+)
+SELECT
+	cs.customer_segment AS 顧客セグメント,
+	COUNT(cs.customer_id) AS 顧客数,
+	SUM(cs.total_purchase) AS `総購入金額(円)`,
+	AVG(cs.six_month_sum) AS `平均LTV(6ヶ月)(円)`
+FROM
+	cust_stats cs
+GROUP BY
+	cs.customer_segment;
 
 
 
