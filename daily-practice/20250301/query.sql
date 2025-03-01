@@ -188,11 +188,212 @@ ORDER BY
 
 
 
+-- 3. 郵便番号エリア別の月次売上成長率を計算してください。
+-- 各郵便番号の前月比成長率（パーセンテージ）と、過去3ヶ月の平均成長率を含めてください。
+-- 結果は最新月の売上高の降順でソートしてください。
 
+WITH area_month_stats AS(
+	SELECT
+		p.postal_code AS area,
+		DATE_FORMAT(v.visit_date,'%Y-%m') AS month_of_year,
+		SUM(v.visit_cost) AS total_income
+	FROM
+		patients p
+		INNER JOIN visits v ON v.patient_id = p.patient_id
+	GROUP BY
+		p.postal_code,
+		DATE_FORMAT(v.visit_date,'%Y-%m')
+),
+area_month_stats_including_past AS(
+	SELECT
+		area,
+		month_of_year,
+		total_income,
+		LAG(total_income) OVER (PARTITION BY area ORDER BY month_of_year ASC) AS one_month_before,
+		LAG(total_income,3) OVER (PARTITION BY area ORDER BY month_of_year ASC) AS three_month_before
+	FROM
+		area_month_stats
+)
+SELECT
+	area,
+	month_of_year,
+	CASE
+		WHEN one_month_before IS NOT NULL THEN CONCAT(ROUND(100.0*(total_income-one_month_before)/one_month_before,1),'%')
+		ELSE '計算不能'
+	END AS one_month_increase_rate,
+	CASE
+		WHEN three_month_before IS NOT NULL THEN CONCAT(ROUND(100.0*(total_income-three_month_before)/three_month_before,1),'%')
+		ELSE '計算不能'
+	END AS three_month_increase_rate
+FROM
+	area_month_stats_including_past
+ORDER BY
+	area ASC,
+	month_of_year ASC;
+	
+--実行結果
+	
+|area    |month_of_year|one_month_increase_rate|three_month_increase_rate|
+|--------|-------------|-----------------------|-------------------------|
+|100-0001|2022-11      |計算不能                   |計算不能                     |
+|100-0001|2022-12      |-52.6%                 |計算不能                     |
+|100-0001|2023-01      |122.2%                 |計算不能                     |
+|100-0001|2023-02      |-55.0%                 |-52.6%                   |
+|100-0002|2022-11      |計算不能                   |計算不能                     |
+|100-0002|2022-12      |-36.4%                 |計算不能                     |
+|100-0002|2023-01      |-35.7%                 |計算不能                     |
+|100-0002|2023-02      |166.7%                 |9.1%                     |
+|100-0003|2022-11      |計算不能                   |計算不能                     |
+|100-0003|2022-12      |-10.0%                 |計算不能                     |
+|100-0003|2023-02      |22.2%                  |計算不能                     |
+|100-0004|2022-11      |計算不能                   |計算不能                     |
+|100-0004|2022-12      |-44.4%                 |計算不能                     |
+|100-0004|2023-01      |80.0%                  |計算不能                     |
+|100-0005|2022-12      |計算不能                   |計算不能                     |
+|100-0005|2023-01      |-25.0%                 |計算不能                     |
+|100-0005|2023-02      |66.7%                  |計算不能                     |
+	
+--AIの講評
 
+このクエリは基本的な部分はよく実装されていますが、問題の要件に対して調整が必要です。具体的には、以下の点が異なっています：
 
+1. **過去3ヶ月の平均成長率**を計算していない - 現在は3ヶ月前との比較率を計算していますが、要件は「過去3ヶ月の平均成長率」です
 
+2. **結果のソート順** - 現在は郵便番号と月でソートしていますが、要件では「最新月の売上高の降順」でソートする必要があります
 
+3. **成長率の計算** - 現在LAGを使用して前月との比較をしていますが、月ごとのデータが連続していない場合（例：2023-02と2023-01の間にデータがない月がある場合）には正確な前月比が取得できない可能性があります
+
+修正したクエリは以下のようになります：
+
+```sql
+WITH area_month_stats AS (
+    SELECT
+        p.postal_code AS area,
+        DATE_FORMAT(v.visit_date,'%Y-%m') AS month_of_year,
+        SUM(v.visit_cost) AS total_income
+    FROM
+        patients p
+        INNER JOIN visits v ON v.patient_id = p.patient_id
+    GROUP BY
+        p.postal_code,
+        DATE_FORMAT(v.visit_date,'%Y-%m')
+),
+area_month_growth AS (
+    SELECT
+        ams.area,
+        ams.month_of_year,
+        ams.total_income,
+        LAG(ams.total_income) OVER (PARTITION BY ams.area ORDER BY ams.month_of_year ASC) AS prev_month_income,
+        (ams.total_income - LAG(ams.total_income) OVER (PARTITION BY ams.area ORDER BY ams.month_of_year ASC)) /
+        LAG(ams.total_income) OVER (PARTITION BY ams.area ORDER BY ams.month_of_year ASC) * 100 AS monthly_growth_rate
+    FROM
+        area_month_stats ams
+),
+area_avg_growth AS (
+    SELECT
+        amg.area,
+        amg.month_of_year,
+        amg.total_income,
+        amg.monthly_growth_rate,
+        AVG(amg2.monthly_growth_rate) OVER (
+            PARTITION BY amg.area
+            ORDER BY amg.month_of_year ASC
+            ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING
+        ) AS avg_3month_growth_rate
+    FROM
+        area_month_growth amg
+        LEFT JOIN area_month_growth amg2 ON amg.area = amg2.area
+            AND amg2.month_of_year < amg.month_of_year
+            AND amg2.month_of_year >= DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(amg.month_of_year, '-01'), '%Y-%m-%d'), INTERVAL 3 MONTH), '%Y-%m')
+)
+SELECT
+    area,
+    month_of_year,
+    total_income,
+    CASE
+        WHEN monthly_growth_rate IS NOT NULL THEN CONCAT(ROUND(monthly_growth_rate, 1), '%')
+        ELSE '計算不能'
+    END AS monthly_growth_rate,
+    CASE
+        WHEN avg_3month_growth_rate IS NOT NULL THEN CONCAT(ROUND(avg_3month_growth_rate, 1), '%')
+        ELSE '計算不能'
+    END AS avg_3month_growth_rate
+FROM
+    area_avg_growth
+WHERE
+    month_of_year = (SELECT MAX(month_of_year) FROM area_month_stats)  -- 最新月のデータのみを取得
+ORDER BY
+    total_income DESC;
+```
+
+この修正版では：
+
+1. 各エリア・月ごとの売上高を計算します
+2. 前月と比較した成長率を計算します
+3. 過去3ヶ月間の成長率の平均を計算します（ウィンドウ関数の「ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING」を使用）
+4. 最新月のデータのみを選択し、売上高の降順でソートします
+
+ただし、現在のクエリでは最後の要件である「結果は最新月の売上高の降順でソートしてください」に対応していません。この要件に対応するためには、最新月を特定し、その月のデータのみを取得する必要があります。
+
+ご指摘ありがとうございます。おっしゃる通りです。過去3ヶ月の平均成長率を正しく計算するには、現在の売上と3ヶ月前の売上との間の複利成長率を計算すべきです。つまり、三乗根（CBRT）を使って正確な月平均成長率を求める必要があります。
+
+修正したクエリは以下のようになります：
+
+```sql
+WITH area_month_stats AS (
+    SELECT
+        p.postal_code AS area,
+        DATE_FORMAT(v.visit_date,'%Y-%m') AS month_of_year,
+        SUM(v.visit_cost) AS total_income
+    FROM
+        patients p
+        INNER JOIN visits v ON v.patient_id = p.patient_id
+    GROUP BY
+        p.postal_code,
+        DATE_FORMAT(v.visit_date,'%Y-%m')
+),
+area_month_with_past AS (
+    SELECT
+        ams.area,
+        ams.month_of_year,
+        ams.total_income,
+        LAG(ams.total_income, 1) OVER (PARTITION BY ams.area ORDER BY ams.month_of_year ASC) AS prev_month_income,
+        LAG(ams.total_income, 3) OVER (PARTITION BY ams.area ORDER BY ams.month_of_year ASC) AS three_month_before_income
+    FROM
+        area_month_stats ams
+)
+SELECT
+    area,
+    month_of_year,
+    total_income,
+    -- 前月比成長率
+    CASE
+        WHEN prev_month_income IS NOT NULL AND prev_month_income > 0 
+        THEN CONCAT(ROUND(100.0 * (total_income - prev_month_income) / prev_month_income, 1), '%')
+        ELSE '計算不能'
+    END AS monthly_growth_rate,
+    -- 3ヶ月間の平均月次成長率（三乗根で計算）
+    CASE
+        WHEN three_month_before_income IS NOT NULL AND three_month_before_income > 0 
+        THEN CONCAT(ROUND(100.0 * (POWER((total_income / three_month_before_income), 1/3) - 1), 1), '%')
+        ELSE '計算不能'
+    END AS avg_3month_growth_rate
+FROM
+    area_month_with_past
+ORDER BY
+    -- 最新月のみ対象とし、その売上高の降順でソート
+    month_of_year = (SELECT MAX(month_of_year) FROM area_month_stats) DESC,
+    total_income DESC;
+```
+
+この修正では：
+
+1. 3ヶ月前の売上と現在の売上の比率を計算
+2. その比率の三乗根を取り、1を引いて平均月次成長率を求める
+   - `POWER((current_value / past_value), 1/3) - 1` という数式
+3. 最新月のデータを優先表示し、その中で売上高の降順でソート
+
+この方法で計算すると、3ヶ月間の複利効果を考慮した正確な平均月次成長率が得られます。例えば、3ヶ月で売上が2倍になった場合、平均月次成長率は約26%（∛2-1 ≈ 0.26）となります。
 
 
 
