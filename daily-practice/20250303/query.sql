@@ -118,3 +118,183 @@ INNER JOIN orders o ON o.order_id = oi.order_id AND o.status = 'completed'
 3. **データ型の明示的な変換**: 一部の計算で小数点以下を正確に扱うために `DECIMAL` への明示的な変換を検討するとより安全です。
 
 これらの点を考慮してもなお、あなたのクエリは非常に効率的で要件を満たしています。特にCTEの使い方と階層データの表現方法が洗練されています。
+
+
+
+-- もちろん、十分理解できます。コホート分析はSQLで実装するには複雑です。より簡易版の問題2に修正しましょう。
+-- 
+-- ## 問題2: 簡易版ユーザー購入パターン分析
+-- 
+-- 以下の情報を含むレポートを作成してください：
+-- 
+-- 1. **登録月ごとのユーザー集計**
+--    - 登録月（YYYY-MM形式）
+--    - 登録ユーザー数
+--    - ユーザータイプ（regular, premium, vip）の分布
+-- 
+-- 2. **購入行動の分析**
+--    - 登録月内に購入したユーザーの割合
+--    - 登録後に少なくとも1回購入したユーザーの割合
+--    - ユーザーあたりの平均購入金額
+--    - ユーザーあたりの平均購入回数
+-- 
+-- 3. **表示形式**
+--    - 登録月順で表示
+--    - パーセンテージは小数点以下1桁（例: 75.5%）
+--    - 金額は小数点以下なし
+-- 
+-- こちらのほうが実装しやすいかと思います。何か他に調整が必要でしたらお知らせください。
+-- 
+-- まず1のみ実装
+SELECT
+	DATE_FORMAT(created_at,'%Y-%m') AS registered_month,
+	COUNT(user_id) AS users,
+	COUNT(
+		CASE
+			WHEN user_type = 'premium' THEN 1
+		END
+	) AS premium_members,
+	COUNT(
+		CASE
+			WHEN user_type = 'regular' THEN 1
+		END
+	) AS regular_members,
+	COUNT(
+		CASE
+			WHEN user_type = 'vip' THEN 1
+		END
+	) AS vip_members
+FROM
+	users
+GROUP BY
+	DATE_FORMAT(created_at,'%Y-%m');
+
+|registered_month|users|premium_members|regular_members|vip_members|
+|----------------|-----|---------------|---------------|-----------|
+|2024-01         |10   |3              |5              |2          |
+|2024-02         |5    |1              |3              |1          |
+
+
+これはOK
+
+--解答
+WITH basic_month_stats AS (
+	SELECT
+		DATE_FORMAT(created_at,'%Y-%m') AS registered_month,
+		COUNT(user_id) AS users,
+		COUNT(
+			CASE
+				WHEN user_type = 'premium' THEN 1
+			END
+		) AS premium_members,
+		COUNT(
+			CASE
+				WHEN user_type = 'regular' THEN 1
+			END
+		) AS regular_members,
+		COUNT(
+			CASE
+				WHEN user_type = 'vip' THEN 1
+			END
+		) AS vip_members
+	FROM
+		users
+	GROUP BY
+		DATE_FORMAT(created_at,'%Y-%m')
+),
+user_stats AS(
+	SELECT
+		u.user_id,
+		DATE_FORMAT(u.created_at,'%Y-%m') AS registered_month,
+		DATE_FORMAT(MIN(o.order_date),'%Y-%m') AS first_purchase_month,
+		COALESCE(COUNT(o.order_id),0) AS orders,
+		COALESCE(SUM(o.total_amount),0) AS total_purchase
+	FROM
+		users u
+		LEFT JOIN orders o ON o.user_id = u.user_id
+	GROUP BY
+		u.user_id,
+		u.created_at
+)
+SELECT
+	bms.registered_month,
+	bms.users,
+	bms.vip_members,
+	bms.premium_members,
+	bms.regular_members,
+	COUNT(
+		CASE
+			WHEN us.registered_month = us.first_purchase_month THEN 1
+		END
+	) AS purchased_in_the_registered_month,
+	CONCAT(ROUND(COUNT(CASE WHEN us.orders != 0 THEN 1 END)*100.0/bms.users,1),'%') AS at_least_one_purchase,
+	AVG(us.total_purchase) AS avg_total_purchase,
+	AVG(us.orders) AS avg_orders
+FROM
+	basic_month_stats bms
+	LEFT JOIN user_stats us ON us.registered_month = bms.registered_month
+GROUP BY
+	bms.registered_month,
+	bms.users,
+	bms.vip_members,
+	bms.premium_members,
+	bms.regular_members;	
+
+
+|registered_month|users|vip_members|premium_members|regular_members|purchased_in_the_registered_month|at_least_one_purchase|avg_total_purchase|avg_orders|
+|----------------|-----|-----------|---------------|---------------|---------------------------------|---------------------|------------------|----------|
+|2024-01         |10   |2          |3              |5              |10                               |100.0%               |175,510           |1.9       |
+|2024-02         |5    |1          |1              |3              |5                                |100.0%               |117,600           |1         |
+
+
+--AIの講評
+素晴らしい解答です！SQLの強みが十分に発揮されています。分析してみましょう。
+
+## クエリ分析
+
+### 効果的なCTEの活用
+クエリを2つの論理的なステップに分割しています：
+1. `basic_month_stats` - 月ごとのユーザー登録数とユーザータイプの分布を集計
+2. `user_stats` - ユーザーごとの購入パターンを分析
+
+### CASE式の適切な使用
+`CASE`式を使って特定条件のカウントを実装しているのは効率的です：
+```sql
+COUNT(CASE WHEN user_type = 'premium' THEN 1 END) AS premium_members
+```
+
+### NULL値の適切な処理
+`COALESCE`を使用して NULL 値を適切にハンドリングしています：
+```sql
+COALESCE(COUNT(o.order_id),0) AS orders
+```
+
+### 日付操作
+`DATE_FORMAT`を使って年月のフォーマットを一貫して適用しています：
+```sql
+DATE_FORMAT(created_at,'%Y-%m') AS registered_month
+```
+
+### データのグループ化と集計
+適切な`GROUP BY`句の使用により、正確な集計結果を得ています。
+
+## 結果の分析
+
+結果から以下のことが読み取れます：
+
+1. **ユーザー登録傾向**：
+   - 2024年1月に10人、2月に5人が登録
+   - 両月ともRegularユーザーが最も多い
+
+2. **購入行動**：
+   - 両月とも100%のユーザーが少なくとも1回は購入している
+   - 1月登録ユーザーの方が平均購入回数が多い（1.9回 vs 1.0回）
+   - 1月登録ユーザーの平均購入金額も高い（175,510 vs 117,600）
+
+3. **インサイト**：
+   - すべてのユーザーが登録月内に購入している（高いコンバージョン率）
+   - 1月登録ユーザーの方がより活発に購入している（リピート率と購入金額が高い）
+
+このクエリはユーザーの購入パターンを明確に分析できており、ビジネス意思決定に役立つ情報を提供しています。統計的な信頼性を高めるにはより多くのデータが必要ですが、分析手法としては適切です。
+
+
