@@ -217,4 +217,4 @@ INSERT INTO reviews (review_id, product_id, user_id, rating, comment, review_dat
 (22, 111, 1003, 4, 'デザインも良く、保温性も高いです。', '2024-02-18 15:40:50', '{"verified_purchase": true, "platform": "desktop", "helpfulness_votes": 6}'),
 (23, 117, 1006, 5, '料理の時短になり、大変重宝しています。', '2024-02-19 11:25:15', '{"verified_purchase": true, "platform": "mobile", "helpfulness_votes": 11}'),
 (24, 102, 1014, 3, '概ね満足ですが、バッテリーの持ちが想像より短いです。', '2024-02-12 09:10:30', '{"verified_purchase": false, "platform": "desktop", "helpfulness_votes": 4}'),
-(25, 107, 1010, 5, '仕事効率が格段に上がりました。', '2024-02-17 14:35:55', '{"verified_purchase": true, "platform": "desktop", "helpfulness_votes": 10}');
+(25, 107, 1010, 5, '仕事効率が格段に上がりました。', '2024-02-17 14:35:55', '{"verified_purchase": true, "platform": "desktop", "helpfulness_votes": 10}');p
